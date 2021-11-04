@@ -996,19 +996,22 @@ UPDATE is the indicator update function."
               (if (eq cmd 'embark-keymap-help)
                   keymap
                 (let ((overriding-terminal-local-map keymap))
-                  (key-binding (seq-take keys (1- (length keys))) 'accept-default)))))
+                  (key-binding (seq-take keys (1- (length keys)))
+                               'accept-default)))))
          (when-let ((win (get-buffer-window embark--verbose-indicator-buffer
                                             'visible)))
            (quit-window 'kill-buffer win))
          (embark-completing-read-prompter prefix-map update)))
       ((or 'universal-argument 'negative-argument 'digit-argument)
-       (let ((last-command-event (aref keys 0)))
+       (let ((last-command-event (aref keys 0))
+             ;; prevent `digit-argument' from modifying the overriding map
+             (overriding-terminal-local-map overriding-terminal-local-map))
          (command-execute cmd))
        (embark-keymap-prompter keymap update))
-      ((guard (lookup-key keymap keys))  ; if directly bound, then obey
-       cmd)
       ((or 'minibuffer-keyboard-quit 'abort-recursive-edit 'abort-minibuffers)
        nil)
+      ((guard (lookup-key keymap keys))  ; if directly bound, then obey
+       cmd)
       ('self-insert-command
        (minibuffer-message "Not an action")
        (embark-keymap-prompter keymap update))
