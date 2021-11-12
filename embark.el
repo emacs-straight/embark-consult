@@ -216,7 +216,17 @@ This is the key representation accepted by `define-key'."
 If the key is set to nil it defaults to the global binding of
 `embark-act'.  The key must be either a string or a vector.  This
 is the key representation accepted by `define-key'."
-  :type '(choice key-sequence (const :tag "None" nil)))
+  :type '(choice key-sequence (const :tag "Use embark-act key" nil)))
+
+(defcustom embark-help-key "\C-h"
+  "Key used for help.
+
+The key must be either nil, a string or a vector.  This
+is the key representation accepted by `define-key'."
+  :type '(choice (const :tag "Use 'C-h'" "\C-h")
+                 (const :tag "Use '?'" "?")
+                 (const :tag "None" nil)
+                 key-sequence))
 
 (defcustom embark-keybinding-repeat
   (propertize "*" 'face 'embark-keybinding-repeat)
@@ -379,7 +389,7 @@ replaced by the single `embark-allow-edit-actions' variable."
   '((async-shell-command embark--shell-prep)
     (shell-command embark--shell-prep)
     (pp-eval-expression embark--eval-prep)
-    (package-delete (lambda (&rest _) (minibuffer-force-complete))))
+    (package-delete embark--force-complete))
   "Alist associating commands with post-injection setup hooks.
 For commands appearing as keys in this alist, run the
 corresponding value as a setup hook after injecting the target
@@ -889,6 +899,8 @@ If CYCLE is non-nil bind `embark-cycle'."
      (define-key map [13] (embark--default-action type))
      (when-let ((cycle-key (and cycle (embark--cycle-key))))
        (define-key map cycle-key #'embark-cycle))
+     (when embark-help-key
+       (define-key map embark-help-key #'embark-keymap-help))
      map)
    (symbol-value (or (alist-get type embark-keymap-alist)
                      (alist-get t embark-keymap-alist)))))
@@ -984,6 +996,14 @@ UPDATE is the indicator update function."
                  (embark--read-key-sequence update)))
          (cmd (let ((overriding-terminal-local-map keymap))
                 (key-binding keys 'accept-default))))
+    ;; Set last-command-event as it would be from the command loop.
+    ;; Previously we only set it locally for digit-argument and for
+    ;; the mouse scroll commands handled in this function. But other
+    ;; commands can need it too! For example, electric-pair-mode users
+    ;; may wish to bind ( to self-insert-command in embark-region-map.
+    ;; Also, as described in issue #402, there are circumstances where
+    ;; you might run consult-narrow through the embark-keymap-prompter.
+    (setq last-command-event (aref keys (1- (length keys))))
     (pcase cmd
       ((or 'embark-keymap-help
            (and 'nil            ; cmd is nil but last key is help-char
@@ -1003,9 +1023,8 @@ UPDATE is the indicator update function."
            (quit-window 'kill-buffer win))
          (embark-completing-read-prompter prefix-map update)))
       ((or 'universal-argument 'negative-argument 'digit-argument)
-       (let ((last-command-event (aref keys 0))
-             ;; prevent `digit-argument' from modifying the overriding map
-             (overriding-terminal-local-map overriding-terminal-local-map))
+       ;; prevent `digit-argument' from modifying the overriding map
+       (let ((overriding-terminal-local-map overriding-terminal-local-map))
          (command-execute cmd))
        (embark-keymap-prompter keymap update))
       ((or 'minibuffer-keyboard-quit 'abort-recursive-edit 'abort-minibuffers)
@@ -1015,7 +1034,7 @@ UPDATE is the indicator update function."
       ('self-insert-command
        (minibuffer-message "Not an action")
        (embark-keymap-prompter keymap update))
-      ((or  'scroll-other-window 'scroll-other-window-down)
+      ((or 'scroll-other-window 'scroll-other-window-down)
        (let ((minibuffer-scroll-window
               ;; NOTE: Here we special case the verbose indicator!
               (or (get-buffer-window embark--verbose-indicator-buffer 'visible)
@@ -1023,7 +1042,7 @@ UPDATE is the indicator update function."
          (ignore-errors (command-execute cmd)))
        (embark-keymap-prompter keymap update))
       ((or 'scroll-bar-toolkit-scroll 'mwheel-scroll 'mac-mwheel-scroll)
-       (funcall cmd (aref keys (1- (length keys))))
+       (funcall cmd last-command-event)
        (embark-keymap-prompter keymap update))
       ('execute-extended-command
        (intern-soft (read-extended-command)))
@@ -1120,9 +1139,13 @@ If NESTED is non-nil subkeymaps are not flattened."
                    collect (cons formatted item))))
     (cons candidates def)))
 
-(defun embark-completing-read-prompter (keymap _update &optional no-default)
+(defun embark-completing-read-prompter (keymap update &optional no-default)
   "Prompt via completion for a command bound in KEYMAP.
-If NO-DEFAULT is t, no default value is passed to `completing-read'."
+If NO-DEFAULT is t, no default value is passed to`completing-read'. 
+
+UPDATE is the indicator update function.  It is not used directly
+here, but if the user switches to `embark-keymap-prompter', the
+UPDATE function is passed to it."
   (let* ((candidates+def (embark--formatted-bindings keymap))
          (candidates (car candidates+def))
          (def (and (not no-default) (cdr candidates+def)))
@@ -1156,19 +1179,13 @@ If NO-DEFAULT is t, no default value is passed to `completing-read'."
                       (define-key map embark-keymap-prompter-key
                         (lambda ()
                           (interactive)
-                          (let*
-                              ((desc
-                                (let ((overriding-terminal-local-map keymap))
-                                  (key-description
-                                   (read-key-sequence "Key:"))))
-                               (cmd
-                                (cl-loop
-                                 for (_s _n cmd _k desc1) in candidates
-                                 when (equal desc desc1) return cmd)))
+                          (message "Press key binding")
+                          (let ((cmd (embark-keymap-prompter keymap update)))
                             (if (null cmd)
                                 (user-error "Unknown key")
                               (throw 'choice cmd))))))
-                    (use-local-map (make-composed-keymap map (current-local-map)))))
+                    (use-local-map
+                     (make-composed-keymap map (current-local-map)))))
               (completing-read
                "Command: "
                (lambda (string predicate action)
@@ -1180,7 +1197,8 @@ If NO-DEFAULT is t, no default value is passed to `completing-read'."
                nil nil nil 'embark--prompter-history def)))))
     (pcase (assoc choice candidates)
       (`(,_formatted ,_name ,cmd ,key ,_desc)
-       (setq last-command-event (seq-elt key (1- (length key))))
+       ;; Set last-command-event as it would be from the command loop.
+       (setq last-command-event (aref key (1- (length key))))
        cmd)
       ('nil (intern-soft choice)))))
 
@@ -1960,11 +1978,14 @@ See `embark-act' for the meaning of the prefix ARG."
 
 (defun embark--become-keymap ()
   "Return keymap of commands to become for current command."
-  (make-composed-keymap
-   (cl-loop for keymap-name in embark-become-keymaps
-            for keymap = (symbol-value keymap-name)
-            when (where-is-internal embark--command (list keymap))
-            collect keymap)))
+  (let ((map (make-composed-keymap
+              (cl-loop for keymap-name in embark-become-keymaps
+                       for keymap = (symbol-value keymap-name)
+                       when (where-is-internal embark--command (list keymap))
+                       collect keymap))))
+    (when embark-help-key
+      (define-key map embark-help-key #'embark-keymap-help))
+    map))
 
 ;;;###autoload
 (defun embark-become (&optional full)
@@ -3283,6 +3304,10 @@ and leaves the point to the left of it."
     (insert " " (shell-quote-wildcard-pattern contents))
     (goto-char (minibuffer-prompt-end))))
 
+(defun embark--force-complete (&rest _)
+  "Select first minibuffer completion candidate matching target."
+  (minibuffer-force-complete))
+
 (defun embark--eval-prep (&rest _)
   "If target is: a variable, skip edit; a function, wrap in parens."
   (if (not (fboundp (intern-soft (minibuffer-contents))))
@@ -3323,7 +3348,6 @@ and leaves the point to the left of it."
 (embark-define-keymap embark-meta-map
   "Keymap for non-action Embark functions."
   :parent nil
-  ("C-h" embark-keymap-help)
   ("-" negative-argument)
   ("0" digit-argument)
   ("1" digit-argument)
