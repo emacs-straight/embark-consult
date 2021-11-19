@@ -2904,7 +2904,22 @@ PRED is a predicate function used to filter the items."
 
 (defun embark-export-customize-variable (variables)
   "Create a customization buffer listing VARIABLES."
-  (embark--export-customize variables "Variables" 'custom-variable #'boundp))
+  ;; The widget library serializes/deserializes the values.
+  ;; We advise the serialization in order to avoid errors for nonserializable variables.
+  (cl-letf* ((ht (make-hash-table :test #'equal))
+             (orig-read (symbol-function #'read))
+             (orig-write (symbol-function #'widget-sexp-value-to-internal))
+             ((symbol-function #'read)
+              (lambda (&optional str)
+                (condition-case nil
+                    (funcall orig-read str)
+                  (error (gethash str ht)))))
+             ((symbol-function #'widget-sexp-value-to-internal)
+              (lambda (widget val)
+                (let ((str (funcall orig-write widget val)))
+                  (puthash str val ht)
+                  str))))
+    (embark--export-customize variables "Variables" 'custom-variable #'boundp)))
 
 (defun embark-export-ibuffer (buffers)
   "Create an ibuffer buffer listing BUFFERS."
