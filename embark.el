@@ -692,14 +692,17 @@ In `dired-mode', it uses `dired-get-filename' instead."
                   (re-search-backward " " (line-beginning-position) 'noerror)
                   (1+ (point)))
                . ,(point)))
-    (when-let (file (ffap-file-at-point))
-      (unless (or (string-match-p "^/https?:/" file)
-                  (when-let (filename (thing-at-point 'filename))
-                    (ffap-el-mode filename)))
-        `(file ,(abbreviate-file-name (expand-file-name file))
-               ;; TODO the boundaries may be wrong, this should be generalized.
-               ;; Unfortunately ffap does not make the bounds available.
-               . ,(bounds-of-thing-at-point 'filename))))))
+    (when-let* ((ffap-file (ffap-file-at-point))
+                (tap-file (thing-at-point 'filename))
+                ;; check the thingatpt candidate is a substring of the
+                ;; ffap candidate, this avoids URLs and keyword
+                ;; symbols when point is on the colon (see bug#52441)
+                ((string-match-p (regexp-quote tap-file) ffap-file))
+                ((not (ffap-el-mode tap-file))))
+      `(file ,(abbreviate-file-name (expand-file-name file))
+             ;; TODO the boundaries may be wrong, this should be generalized.
+             ;; Unfortunately ffap does not make the bounds available.
+             . ,(bounds-of-thing-at-point 'filename)))))
 
 (defun embark-target-library-file-at-point ()
   "Target the file of the Emacs Lisp library at point.
@@ -813,10 +816,12 @@ in one of those major modes."
 (defun embark-target-identifier-at-point ()
   "Target identifier at point.
 
-In Emacs Lisp buffers the identifier is promoted to a symbol, for
-which more actions are available.  Identifiers are also promoted
-to symbols if they are interned Emacs Lisp symbols and found in a
-buffer whose major mode does not inherit from `prog-mode'.
+In Emacs Lisp and IELM buffers the identifier is promoted to a
+symbol, for which more actions are available.  Identifiers are
+also promoted to symbols if they are interned Emacs Lisp symbols
+and found in a buffer in a major mode derived from
+`special-mode', `Info-mode' or `text-mode' (these are intended to
+cover cases where you might be reading or writing about Emacs).
 
 As a convenience, in Org Mode an initial ' or surrounding == or
 ~~ are removed."
@@ -831,8 +836,9 @@ As a convenience, in Org Mode an initial ' or surrounding == or
                (cl-incf (car bounds))
                (cl-decf (cdr bounds)))))
       `(,(if (or (derived-mode-p 'emacs-lisp-mode)
+                 (derived-mode-p 'inferior-emacs-lisp-mode)
                  (and (intern-soft name)
-                      (not (derived-mode-p 'prog-mode))))
+                      (derived-mode-p 'special-mode 'Info-mode 'text-mode)))
              'symbol
            'identifier)
         ,name
@@ -849,7 +855,7 @@ As a convenience, in Org Mode an initial ' or surrounding == or
                   ;; default definition from outline.el
                   (or (bound-and-true-p outline-regexp) "[*\^L]+"))))
       (require 'outline) ;; Ensure that outline commands are available
-      `(heading ,(buffer-substring-no-properties beg end) ,beg . ,end))))
+      `(heading ,(buffer-substring beg end) ,beg . ,end))))
 
 (defun embark-target-top-minibuffer-completion ()
   "Target the top completion candidate in the minibuffer.
@@ -927,8 +933,10 @@ relative path."
   "Return action keymap for targets of given TYPE.
 If CYCLE is non-nil bind `embark-cycle'."
   (make-composed-keymap
-   (let ((map (make-sparse-keymap)))
-     (define-key map [13] (embark--default-action type))
+   (let ((map (make-sparse-keymap))
+         (default-action (embark--default-action type)))
+     (define-key map [13] default-action)
+     (define-key map [return] default-action)
      (when-let ((cycle-key (and cycle (embark--cycle-key))))
        (define-key map cycle-key #'embark-cycle))
      (when embark-help-key
@@ -942,7 +950,7 @@ If CYCLE is non-nil bind `embark-cycle'."
   (unless (stringp target)
     (setq target (format "%s" target)))
   (if-let (pos (string-match-p "\n" target))
-      (concat (substring target 0 pos) "…")
+      (concat (car (split-string target "\n" 'omit-nulls "\\s-*")) "…")
     target))
 
 (defun embark--act-label (rep multi)
@@ -2108,9 +2116,8 @@ See `embark-act' for the meaning of the prefix ARG."
                        0
                      (mod (prefix-numeric-value arg) (length targets)))
                    targets)))
-             (default-action (embark--default-action
-                              (plist-get target :type))))
-        (embark--act default-action
+             (default-action (embark--default-action (plist-get target :type))))
+        (embark--act (or (command-remapping default-action) default-action)
                      (if (eq default-action embark--command)
                          (embark--orig-target target)
                        target)
