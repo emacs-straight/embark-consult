@@ -452,6 +452,8 @@ the key :always are executed always."
     (count-words-region embark--mark-target)
     (shell-command-on-region embark--mark-target)
     (delete-region embark--mark-target)
+    (format-encode-region embark--mark-target embark--ignore-target)
+    (format-decode-region embark--mark-target embark--ignore-target)
     ;; commands we want to be able to jump back from
     ;; (embark-find-definition achieves this by calling
     ;; xref-find-definitions which pushes the markers itself)
@@ -699,7 +701,7 @@ In `dired-mode', it uses `dired-get-filename' instead."
                 ;; symbols when point is on the colon (see bug#52441)
                 ((string-match-p (regexp-quote tap-file) ffap-file))
                 ((not (ffap-el-mode tap-file))))
-      `(file ,(abbreviate-file-name (expand-file-name file))
+      `(file ,(abbreviate-file-name (expand-file-name ffap-file))
              ;; TODO the boundaries may be wrong, this should be generalized.
              ;; Unfortunately ffap does not make the bounds available.
              . ,(bounds-of-thing-at-point 'filename)))))
@@ -936,7 +938,6 @@ If CYCLE is non-nil bind `embark-cycle'."
    (let ((map (make-sparse-keymap))
          (default-action (embark--default-action type)))
      (define-key map [13] default-action)
-     (define-key map [return] default-action)
      (when-let ((cycle-key (and cycle (embark--cycle-key))))
        (define-key map cycle-key #'embark-cycle))
      (when embark-help-key
@@ -3134,7 +3135,18 @@ Return the category metadatum as the type of the candidates."
     (cons (completion-metadata-get (embark--metadata) 'category)
           vertico--candidates)))
 
+(defun embark--vertico-indicator ()
+  "Embark indicator highlighting the current Vertico candidate."
+  (let ((fr face-remapping-alist))
+    (lambda (&optional keymap _targets _prefix)
+      (when vertico--input
+        (setq-local face-remapping-alist
+                    (if keymap
+                        (cons '(vertico-current . embark-target) fr)
+                      fr))))))
+
 (with-eval-after-load 'vertico
+  (add-hook 'embark-indicators #'embark--vertico-indicator)
   (add-hook 'embark-target-finders #'embark--vertico-selected)
   (add-hook 'embark-candidate-collectors #'embark--vertico-candidates))
 
@@ -3169,7 +3181,18 @@ Return the category metadatum as the type of the candidates."
 	   ;; Pass relative file names for dired.
 	   minibuffer-completing-file-name))))
 
+(defun embark--selectrum-indicator ()
+  "Embark indicator highlighting the current Selectrum candidate."
+  (let ((fr face-remapping-alist))
+    (lambda (&optional keymap _targets _prefix)
+      (when selectrum-is-active
+        (setq-local face-remapping-alist
+                    (if keymap
+                        (cons '(selectrum-current-candidate . embark-target) fr)
+                      fr))))))
+
 (with-eval-after-load 'selectrum
+  (add-hook 'embark-indicators #'embark--selectrum-indicator)
   (add-hook 'embark-target-finders #'embark--selectrum-selected)
   (add-hook 'embark-candidate-collectors #'embark--selectrum-candidates))
 
@@ -3481,6 +3504,44 @@ With a prefix argument EDEBUG, instrument the code for debugging."
              (all-completions (symbol-name prefix)
                               obarray 'elp-profilable-p)))))
 
+(defmacro embark--define-hash (algorithm)
+  "Define command which computes hash from a string.
+ALGORITHM is the hash algorithm symbol understood by `secure-hash'."
+  `(defun ,(intern (format "embark-hash-%s" algorithm)) (str)
+     ,(format "Compute %s hash of STR and store it in the kill ring." algorithm)
+     (interactive "sString: ")
+     (let ((hash (secure-hash ',algorithm str)))
+       (kill-new hash)
+       (message "%s: %s" ',algorithm hash))))
+
+(embark--define-hash md5)
+(embark--define-hash sha1)
+(embark--define-hash sha224)
+(embark--define-hash sha256)
+(embark--define-hash sha384)
+(embark--define-hash sha512)
+
+(defun embark-encode-url (start end)
+  "Properly URI-encode the region between START and END in current buffer."
+  (interactive "r")
+  (let ((encoded (url-encode-url (buffer-substring-no-properties start end))))
+    (delete-region start end)
+    (insert encoded)))
+
+(defun embark-decode-url (start end)
+  "Decode the URI-encoded region between START and END in current buffer."
+  (interactive "r")
+  (let ((decoded (url-unhex-string (buffer-substring-no-properties start end))))
+    (delete-region start end)
+    (insert decoded)))
+
+(defvar epa-replace-original-text)
+(defun embark-epa-decrypt-region (start end)
+  "Decrypt region between START and END."
+  (interactive "r")
+  (let ((epa-replace-original-text t))
+    (epa-decrypt-region start end)))
+
 ;;; Setup and pre-action hooks
 
 (defun embark--restart (&rest _)
@@ -3569,6 +3630,30 @@ and leaves the point to the left of it."
   ("SPC" mark)
   ("DEL" delete-region))
 
+(embark-define-keymap embark-encode-map
+  "Keymap for Embark region encoding actions."
+  :parent nil
+  ("r" rot13-region)
+  ("." morse-region)
+  ("-" unmorse-region)
+  ("s" studlify-region)
+  ("m" embark-hash-md5)
+  ("1" embark-hash-sha1)
+  ("2" embark-hash-sha256)
+  ("3" embark-hash-sha384)
+  ("4" embark-hash-sha224)
+  ("5" embark-hash-sha512)
+  ("f" format-encode-region)
+  ("F" format-decode-region)
+  ("b" base64-encode-region)
+  ("B" base64-decode-region)
+  ("u" embark-encode-url)
+  ("U" embark-decode-url)
+  ("c" epa-encrypt-region)
+  ("C" embark-epa-decrypt-region))
+
+(fset 'embark-encode-map embark-encode-map)
+
 (embark-define-keymap embark-sort-map
   "Keymap for Embark actions that sort the region"
   :parent nil
@@ -3581,7 +3666,6 @@ and leaves the point to the left of it."
   ("n" sort-numeric-fields))
 
 (fset 'embark-sort-map embark-sort-map)
-
 
 ;; these will have autoloads in Emacs 28
 (autoload 'calc-grab-sum-down "calc" nil t)
@@ -3606,9 +3690,8 @@ and leaves the point to the left of it."
   ("f" fill-region)
   ("p" fill-region-as-paragraph)
   ("$" ispell-region)
-  ("r" rot13-region)
   ("=" count-words-region)
-  ("s" whitespace-cleanup-region)
+  ("SPC" whitespace-cleanup-region)
   ("t" transpose-regions)
   ("o" org-table-convert-region)
   (";" comment-or-uncomment-region)
@@ -3619,9 +3702,14 @@ and leaves the point to the left of it."
   ("*" calc-grab-region)
   (":" calc-grab-sum-down)
   ("_" calc-grab-sum-across)
-  ("R" reverse-region)
-  ("D" delete-duplicate-lines)
-  ("S" 'embark-sort-map))
+  ("r" reverse-region)
+  ("d" delete-duplicate-lines)
+  ("b" browse-url-of-region)
+  ("h" shr-render-region)
+  ("'" expand-region-abbrevs)
+  ("v" vc-region-history)
+  ("s" 'embark-sort-map)
+  (">" 'embark-encode-map))
 
 (embark-define-keymap embark-file-map
   "Keymap for Embark file actions."
@@ -3694,7 +3782,9 @@ and leaves the point to the left of it."
   ("a" xref-find-apropos)
   ("s" info-lookup-symbol)
   ("n" embark-next-symbol)
-  ("p" embark-previous-symbol))
+  ("p" embark-previous-symbol)
+  ("'" expand-abbrev)
+  ("$" ispell-word))
 
 (embark-define-keymap embark-expression-map
   "Keymap for Embark expression actions."
@@ -3813,7 +3903,9 @@ and leaves the point to the left of it."
   ("<" bookmark-insert)
   ("j" bookmark-jump)
   ("o" bookmark-jump-other-window)
-  ("f" bookmark-jump-other-frame))
+  ("f" bookmark-jump-other-frame)
+  ("a" 'bookmark-show-annotation)
+  ("e" 'bookmark-edit-annotation))
 
 (embark-define-keymap embark-unicode-name-map
   "Keymap for Embark unicode name actions."
@@ -3826,7 +3918,7 @@ and leaves the point to the left of it."
   ("$" ispell-region)
   ("f" fill-region)
   ("u" upcase-region)
-  ("d" downcase-region)
+  ("l" downcase-region)
   ("c" capitalize-region)
   ("s" whitespace-cleanup-region)
   ("=" count-words-region))
