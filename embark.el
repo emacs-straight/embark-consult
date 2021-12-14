@@ -149,6 +149,7 @@ For any type not listed here, `embark-act' will use
 (defcustom embark-target-finders
   '(embark-target-top-minibuffer-completion
     embark-target-active-region
+    embark-target-text-heading-at-point
     embark-target-collect-candidate
     embark-target-completion-at-point
     embark-target-bug-reference-at-point
@@ -163,7 +164,7 @@ For any type not listed here, `embark-act' will use
     embark-target-sentence-at-point
     embark-target-paragraph-at-point
     embark-target-defun-at-point
-    embark-target-heading-at-point)
+    embark-target-prog-heading-at-point)
   "List of functions to determine the target in current context.
 Each function should take no arguments and return either nil to
 indicate that no target has been found, a cons (type . target)
@@ -858,6 +859,16 @@ As a convenience, in Org Mode an initial ' or surrounding == or
                   (or (bound-and-true-p outline-regexp) "[*\^L]+"))))
       (require 'outline) ;; Ensure that outline commands are available
       `(heading ,(buffer-substring beg end) ,beg . ,end))))
+
+(defun embark-target-text-heading-at-point ()
+  "Target the outline heading at point in text modes."
+  (when (derived-mode-p 'text-mode)
+    (embark-target-heading-at-point)))
+
+(defun embark-target-prog-heading-at-point ()
+  "Target the outline heading at point in programming modes."
+  (when (derived-mode-p 'prog-mode)
+    (embark-target-heading-at-point)))
 
 (defun embark-target-top-minibuffer-completion ()
   "Target the top completion candidate in the minibuffer.
@@ -3233,7 +3244,7 @@ Return the category metadatum as the type of the target."
   (add-hook 'embark-target-finders #'embark--ivy-selected)
   (add-hook 'embark-candidate-collectors #'embark--ivy-candidates))
 
-;;; Custom actions
+;;; Custom actions open-line open-line
 
 (defun embark-keymap-help ()
   "Prompt for an action to perform or command to become and run it."
@@ -3241,12 +3252,38 @@ Return the category metadatum as the type of the target."
   (user-error "Not meant to be called directly"))
 
 (defun embark-insert (string)
-  "Insert STRING at point."
+  "Insert STRING at point.
+Some whitespace is also inserted if necessary to avoid having the
+inserted string blend into the existing buffer text.  More
+precisely:
+
+1. If the inserted string does not contain newlines, a space may
+be added before or after it as needed to avoid inserting a word
+constituent character next to an existing word constituent.
+
+2. For a multiline inserted string, newlines may be added before
+or after as needed to ensure the inserted string is on lines of
+its own."
   (interactive "sInsert: ")
-  (if buffer-read-only
-      (with-selected-window (other-window-for-scrolling)
-        (insert string))
-    (insert string)))
+  (let ((multiline (string-match-p "\n" string)))
+    (cl-flet* ((maybe-space ()
+                 (and (looking-at "\\w") (looking-back "\\w" 1)
+                      (insert " ")))
+               (maybe-newline ()
+                 (or (looking-back "^[ \t]*" 40) (looking-at "\n\n")
+                     (newline-and-indent)))
+               (maybe-whitespace ()
+                 (if multiline (maybe-newline) (maybe-space)))
+               (insert-string ()
+                 (save-excursion
+                   (insert string)
+                   (maybe-whitespace)
+                   (delete-blank-lines))
+                 (maybe-whitespace)))
+      (if buffer-read-only
+          (with-selected-window (other-window-for-scrolling)
+            (insert-string))
+        (insert-string)))))
 
 (define-obsolete-function-alias
   'embark-save
@@ -3844,6 +3881,7 @@ and leaves the point to the left of it."
 (embark-define-keymap embark-face-map
   "Keymap for Embark face actions."
   :parent embark-symbol-map
+  ("h" describe-face)
   ("c" customize-face)
   ("+" make-face-bold)
   ("-" make-face-unbold)
