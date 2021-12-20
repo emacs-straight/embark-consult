@@ -372,6 +372,7 @@ with `find-file'."
     delete-directory
     kill-buffer
     shell-command
+    shell-command-on-region
     async-shell-command
     embark-kill-buffer-and-window
     pp-eval-expression)
@@ -416,9 +417,10 @@ the key :always are executed always."
                  "0.12"))
 
 (defcustom embark-pre-action-hooks
-  '(;; region commands which prompt for a filename
+  '(;; region commands which prompt for a filename or command
     (write-region embark--ignore-target embark--mark-target)
     (append-to-file embark--ignore-target embark--mark-target)
+    (shell-command-on-region embark--ignore-target embark--mark-target)
     ;; commands which evaluate code not given at a prompt
     (embark-pp-eval-defun embark--ignore-target)
     (eval-defun embark--ignore-target)
@@ -1219,6 +1221,16 @@ If NESTED is non-nil subkeymaps are not flattened."
                    collect (cons formatted item))))
     (cons candidates def)))
 
+(defun embark--with-category (category candidates)
+  "Return completion table for CANDIDATES of CATEGORY with sorting disabled."
+  (lambda (string predicate action)
+    (if (eq action 'metadata)
+        `(metadata (display-sort-function . identity)
+                   (cycle-sort-function . identity)
+                   (category . ,category))
+      (complete-with-action
+       action candidates string predicate))))
+
 (defun embark-completing-read-prompter (keymap update &optional no-default)
   "Prompt via completion for a command bound in KEYMAP.
 If NO-DEFAULT is t, no default value is passed to`completing-read'.
@@ -1268,12 +1280,7 @@ UPDATE function is passed to it."
                      (make-composed-keymap map (current-local-map)))))
               (completing-read
                "Command: "
-               (lambda (string predicate action)
-                 (if (eq action 'metadata)
-                     `(metadata (category . embark-keybinding)
-                                (display-sort-function . identity)
-                                (cycle-sort-function . identity))
-                   (complete-with-action action candidates string predicate)))
+               (embark--with-category 'embark-keybinding candidates)
                nil nil nil 'embark--prompter-history def)))))
     (pcase (assoc choice candidates)
       (`(,_formatted ,_name ,cmd ,key ,_desc)
@@ -1565,8 +1572,49 @@ further user intervention."
                    (funcall vindicator keymap targets prefix)))))))))
 
 ;;;###autoload
+(defun embark-bindings-in-keymap (keymap)
+  "Explore command key bindings in KEYMAP with `completing-read'.
+The selected command will be executed.  Interactively, prompt the
+user for a KEYMAP variable."
+  (interactive
+   (list
+    (symbol-value
+     (intern-soft
+      (completing-read
+       "Keymap: "
+       (embark--with-category
+        'variable
+        (cl-loop for x being the symbols
+                 if (and (boundp x) (keymapp (symbol-value x)))
+                 collect (symbol-name x)))
+       nil t nil 'variable-name-history
+       (let ((major-mode-map
+              (concat (symbol-name major-mode) "-map")))
+         (when (intern-soft major-mode-map) major-mode-map)))))))
+  (when-let (command (embark-completing-read-prompter keymap nil 'no-default))
+    (call-interactively command)))
+
+;;;###autoload
+(defun embark-bindings ()
+  "Explore all current command key bindings with `completing-read'.
+The selected command will be executed."
+  (interactive)
+  (embark-bindings-in-keymap (make-composed-keymap (current-active-maps t))))
+
+;;;###autoload
+(defun embark-bindings-at-point ()
+  "Explore all current command key bindings with `completing-read'.
+The selected command will be executed."
+  (interactive)
+  (let ((keymaps (delq nil (list (get-text-property (point) 'keymap)
+                                 (get-text-property (point) 'local-keymap)))))
+    (unless keymaps
+      (user-error "No key bindings found at point"))
+    (embark-bindings-in-keymap (make-composed-keymap keymaps))))
+
+;;;###autoload
 (defun embark-prefix-help-command ()
-  "Prompt for and run a command bound in the prefix used to reach this command.
+  "Prompt for and run a command bound in the prefix used for this command.
 The prefix described consists of all but the last event of the
 key sequence that ran this command.  This function is intended to
 be used as a value for `prefix-help-command'.
@@ -1574,22 +1622,10 @@ be used as a value for `prefix-help-command'.
 In addition to using completion to select a command, you can also
 type @ and the key binding (without the prefix)."
   (interactive)
-  (let ((keys (this-command-keys-vector)))
-    (embark-bindings (seq-take keys (1- (length keys))))))
-
-;;;###autoload
-(defun embark-bindings (&optional prefix)
-  "Explore all current command key bindings with `completing-read'.
-The selected command will be executed.  The set of key bindings can
-be restricted by passing a PREFIX key."
-  (interactive)
-  (let ((keymap (if prefix
-                    (key-binding prefix 'accept-default)
-                  (make-composed-keymap (current-active-maps t)))))
-    (unless (keymapp keymap)
-      (user-error "No key bindings found"))
-    (when-let (command (embark-completing-read-prompter keymap nil 'no-default))
-      (call-interactively command))))
+  (when-let ((keys (this-command-keys-vector))
+             (prefix (seq-take keys (1- (length keys))))
+             (keymap (key-binding prefix 'accept-default)))
+    (embark-bindings-in-keymap keymap)))
 
 (defun embark--prompt (indicators keymap targets)
   "Call the prompter with KEYMAP and INDICATORS.
@@ -3334,12 +3370,7 @@ When called with a prefix argument OTHER-WINDOW, open dired in other window."
   "Read with completion from list of history CANDIDATES of CATEGORY.
 Sorting and history are disabled. PROMPT is the prompt message."
   (completing-read prompt
-                   (lambda (string predicate action)
-                     (if (eq action 'metadata)
-                         `(metadata (display-sort-function . identity)
-                                    (cycle-sort-function . identity)
-                                    (category . ,category))
-                       (complete-with-action action candidates string predicate)))
+                   (embark--with-category category candidates)
                    nil t nil t))
 
 (defun embark-kill-ring-remove (text)
