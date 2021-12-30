@@ -5,7 +5,7 @@
 ;; Author: Omar Antolín Camarena <omar@matem.unam.mx>
 ;; Maintainer: Omar Antolín Camarena <omar@matem.unam.mx>
 ;; Keywords: convenience
-;; Version: 0.2
+;; Version: 0.3
 ;; Homepage: https://github.com/oantolin/embark
 ;; Package-Requires: ((emacs "26.1") (embark "0.12") (consult "0.10"))
 
@@ -201,19 +201,6 @@ The elements of LINES are assumed to be values of category `consult-line'."
 (setf (alist-get 'consult-grep embark-collect-initial-view-alist)
       'list)
 
-;;; Support for consult-multi
-
-(defun embark-consult--multi-transform (_type target)
-  "Refine `consult-multi' TARGET to its real type.
-This function takes a target of type `consult-multi' (from
-Consult's `consult-multi' category) and transforms it to its
-actual type."
-  (or (get-text-property 0 'consult-multi target)
-      (cons 'general target)))
-
-(setf (alist-get 'consult-multi embark-transformer-alist)
-      #'embark-consult--multi-transform)
-
 ;;; Support for consult-isearch
 
 (setf (alist-get 'consult-isearch embark-transformer-alist)
@@ -266,26 +253,30 @@ actual type."
 (define-key embark-general-map "C" 'embark-consult-search-map)
 
 (map-keymap
- (lambda (_key cmd) (cl-pushnew cmd embark-allow-edit-actions))
+ (lambda (_key cmd)
+   (cl-pushnew 'embark--allow-edit
+               (alist-get cmd embark-target-injection-hooks)))
  embark-consult-search-map)
 
 (defun embark-consult--unique-match (&rest _)
   "If there is a unique matching candidate, accept it.
-This is intended to be used in `embark-setup-action-hooks' for some
-actions that are on `embark-allow-edit-actions'."
+This is intended to be used in `embark-target-injection-hooks'."
   (let ((candidates (cdr (embark-minibuffer-candidates))))
-    (unless (or (null candidates) (cdr candidates))
+    (if (or (null candidates) (cdr candidates))
+        (embark--allow-edit)
       (delete-minibuffer-contents)
-      (insert (car candidates))
-      (add-hook 'post-command-hook #'exit-minibuffer nil t))))
+      (insert (car candidates)))))
 
 (dolist (cmd '(consult-outline consult-imenu consult-imenu-multi))
+  (setf (alist-get cmd embark-target-injection-hooks)
+        (remq 'embark--allow-edit
+              (alist-get cmd embark-target-injection-hooks)))
   (cl-pushnew #'embark-consult--unique-match
-              (alist-get cmd embark-setup-action-hooks)))
+              (alist-get cmd embark-target-injection-hooks)))
 
 (defun embark-consult--add-async-separator (&rest _)
   "Add Consult's async separator at the beginning.
-This is intended to be used in `embark-setup-action-hooks' for any action
+This is intended to be used in `embark-target-injection-hooks' for any action
 that is a Consult async command."
   (let* ((style (alist-get consult-async-split-style
                            consult-async-split-styles-alist))
@@ -303,7 +294,7 @@ that is a Consult async command."
 (map-keymap
  (lambda (_key cmd)
    (cl-pushnew #'embark-consult--add-async-separator
-               (alist-get cmd embark-setup-action-hooks)))
+               (alist-get cmd embark-target-injection-hooks)))
  embark-consult-async-search-map)
 
 ;;; Tables of contents for buffers: imenu and outline candidate collectors
