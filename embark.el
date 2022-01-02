@@ -473,7 +473,12 @@ the key :always are executed always."
     (delete-file embark--confirm)
     (delete-directory embark--confirm)
     (kill-buffer embark--confirm)
-    (embark-kill-buffer-and-window embark--confirm))
+    (embark-kill-buffer-and-window embark--confirm)
+    ;; search for region contents outside said region
+    (embark-isearch embark--unmark-target)
+    (occur embark--unmark-target)
+    (query-replace embark--beginning-of-target embark--unmark-target)
+    (query-replace-regexp embark--beginning-of-target embark--unmark-target))
   "Alist associating commands with pre-action hooks.
 The hooks are run right before an action is embarked upon.  See
 `embark-target-injection-hooks' for information about the hook
@@ -3699,6 +3704,10 @@ and leaves the point to the left of it."
     (set-mark (cdr bounds))
     (goto-char (car bounds))))
 
+(cl-defun embark--unmark-target (&rest _)
+  "Deactivate the region target."
+  (deactivate-mark t))
+
 (defun embark--allow-edit (&rest _)
   "Allow editing the target."
   (remove-hook 'post-command-hook 'exit-minibuffer t)
@@ -3877,7 +3886,8 @@ and leaves the point to the left of it."
   ("f" find-library)
   ("h" finder-commentary)
   ("a" apropos-library)
-  ("L" locate-library))
+  ("L" locate-library)
+  ("m" info-display-manual))
 
 (embark-define-keymap embark-buffer-map
   "Keymap for Embark buffer actions."
@@ -3904,7 +3914,8 @@ and leaves the point to the left of it."
   ("n" embark-next-symbol)
   ("p" embark-previous-symbol)
   ("'" expand-abbrev)
-  ("$" ispell-word))
+  ("$" ispell-word)
+  ("o" occur))
 
 (embark-define-keymap embark-expression-map
   "Keymap for Embark expression actions."
