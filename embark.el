@@ -478,7 +478,9 @@ the key :always are executed always."
     (embark-isearch embark--unmark-target)
     (occur embark--unmark-target)
     (query-replace embark--beginning-of-target embark--unmark-target)
-    (query-replace-regexp embark--beginning-of-target embark--unmark-target))
+    (query-replace-regexp embark--beginning-of-target embark--unmark-target)
+    ;; narrow to target for duration of action
+    (repunctuate-sentences embark--narrow-to-target))
   "Alist associating commands with pre-action hooks.
 The hooks are run right before an action is embarked upon.  See
 `embark-target-injection-hooks' for information about the hook
@@ -3708,6 +3710,21 @@ and leaves the point to the left of it."
   "Deactivate the region target."
   (deactivate-mark t))
 
+(cl-defun embark--narrow-to-target (&key action bounds &allow-other-keys)
+  "Narrow buffer to target if its BOUNDS are known.
+Intended for use as an Embark pre-action hook.  This function
+advises ACTION to narrow to the given BOUNDS prior to running.
+The advice is self-removing so it only affects ACTION once."
+  (when (and (consp bounds) (symbolp action))
+    (cl-labels ((with-restriction (fn &rest args)
+                  (save-excursion
+                    (save-restriction
+                      (narrow-to-region (car bounds) (cdr bounds))
+                      (goto-char (car bounds))
+                      (unwind-protect (apply fn args)
+                        (advice-remove action #'with-restriction))))))
+      (advice-add action :around #'with-restriction))))
+
 (defun embark--allow-edit (&rest _)
   "Allow editing the target."
   (remove-hook 'post-command-hook 'exit-minibuffer t)
@@ -3837,8 +3854,18 @@ and leaves the point to the left of it."
   ("h" shr-render-region)
   ("'" expand-region-abbrevs)
   ("v" vc-region-history)
+  ("R" repunctuate-sentences)
   ("s" 'embark-sort-map)
   (">" 'embark-encode-map))
+
+(embark-define-keymap embark-vc-file-map
+  "Keymap for Embark VC file actions."
+  :parent nil
+  ("d" vc-delete-file)
+  ("r" vc-rename-file)
+  ("i" vc-ignore))
+
+(fset 'embark-vc-file-map embark-vc-file-map)
 
 (embark-define-keymap embark-file-map
   "Keymap for Embark file actions."
@@ -3862,7 +3889,8 @@ and leaves the point to the left of it."
   ("W" embark-save-relative-path)
   ("l" load-file)
   ("b" byte-compile-file)
-  ("R" byte-recompile-directory))
+  ("R" byte-recompile-directory)
+  ("v" 'embark-vc-file-map))
 
 (embark-define-keymap embark-kill-ring-map
   "Keymap for `kill-ring' commands."
@@ -4069,7 +4097,8 @@ and leaves the point to the left of it."
   :parent embark-prose-map
   ("t" transpose-paragraphs)
   ("n" forward-paragraph)
-  ("p" backward-paragraph))
+  ("p" backward-paragraph)
+  ("R" repunctuate-sentences))
 
 (embark-define-keymap embark-become-help-map
   "Keymap for Embark help actions."
@@ -4097,7 +4126,8 @@ and leaves the point to the left of it."
   ("b" switch-to-buffer)
   ("4b" switch-to-buffer-other-window)
   ("l" locate)
-  ("L" find-library))
+  ("L" find-library)
+  ("v" vc-dir))
 
 (embark-define-keymap embark-become-shell-command-map
   "Embark become keymap for shell commands."
