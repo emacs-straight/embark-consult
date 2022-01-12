@@ -9,6 +9,8 @@
 ;; Homepage: https://github.com/oantolin/embark
 ;; Package-Requires: ((emacs "26.1"))
 
+;; This file is part of GNU Emacs.
+
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 3 of the License, or
@@ -125,7 +127,8 @@
     (buffer . embark-buffer-map)
     (expression . embark-expression-map)
     (identifier . embark-identifier-map)
-    (defun . embark-defun-map)
+    ;; NOTE: Weird space in front of defun to please package-lint.
+    ( defun . embark-defun-map)
     (symbol . embark-symbol-map)
     (face . embark-face-map)
     (command . embark-command-map)
@@ -179,9 +182,7 @@ bounds pair of the target at point for highlighting."
     (embark-keybinding . embark--keybinding-command)
     (project-file . embark--project-file-full-path)
     (package . embark--remove-package-version)
-    (multi-category . embark--refine-multi-category)
-    ;; TODO: `consult-multi' has been obsoleted by `multi-category'. Remove!
-    (consult-multi . embark--refine-multi-category))
+    (multi-category . embark--refine-multi-category))
   "Alist associating type to functions for transforming targets.
 Each function should take a type and a target string and return a
 pair of the form a `cons' of the new type and the new target."
@@ -1836,8 +1837,6 @@ minibuffer before executing the action."
 (defun embark--refine-multi-category (_type target)
   "Refine `multi-category' TARGET to its actual type."
   (or (get-text-property 0 'multi-category target)
-      ;; TODO: `consult-multi' has been obsoleted by `multi-category'. Remove!
-      (get-text-property 0 'consult-multi target)
       (cons 'general target)))
 
 (defun embark--refine-symbol-type (_type target)
@@ -3363,7 +3362,7 @@ its own."
                      (newline-and-indent)))
                (maybe-whitespace ()
                  (if multiline (maybe-newline) (maybe-space)))
-               (insert-string ()
+               (ins-string ()
                  (save-excursion
                    (insert string)
                    (maybe-whitespace)
@@ -3371,8 +3370,8 @@ its own."
                  (maybe-whitespace)))
       (if buffer-read-only
           (with-selected-window (other-window-for-scrolling)
-            (insert-string))
-        (insert-string)))))
+            (ins-string))
+        (ins-string)))))
 
 (define-obsolete-function-alias
   'embark-save
