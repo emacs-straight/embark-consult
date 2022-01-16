@@ -5,7 +5,7 @@
 ;; Author: Omar Antolín Camarena <omar@matem.unam.mx>
 ;; Maintainer: Omar Antolín Camarena <omar@matem.unam.mx>
 ;; Keywords: convenience
-;; Version: 0.14
+;; Version: 0.15
 ;; Homepage: https://github.com/oantolin/embark
 ;; Package-Requires: ((emacs "26.1"))
 
@@ -1003,14 +1003,48 @@ If CYCLE is non-nil bind `embark-cycle'."
       (concat (car (split-string target "\n" 'omit-nulls "\\s-*")) "…")
     target))
 
-(defun embark--act-label (rep multi)
-  "Return highlighted Act/Rep indicator label given REP and MULTI."
-  (propertize
-   (cond
-    (multi "∀ct")
-    (rep "Rep")
-    (t "Act"))
-   'face 'highlight))
+(defun embark--format-targets (target shadowed-targets rep)
+  "Return a formatted string indicating the TARGET of an action.
+
+This is used internally by the minimal indicator and for the
+targets section of the verbose indicator.  The string will also
+mention any SHADOWED-TARGETS.  A non-nil REP indicates we are in
+a repeating sequence of actions."
+  (let ((act (propertize
+              (cond
+               ((plist-get target :multi) "∀ct")
+               (rep "Rep")
+               (t "Act"))
+              'face 'highlight))) 
+    (cond
+     ((eq (plist-get target :type) 'embark-become)
+      (propertize "Become" 'face 'highlight))
+     ((and (minibufferp)
+           (not (eq 'embark-keybinding
+                    (completion-metadata-get
+                     (embark--metadata)
+                     'category))))
+      ;; we are in a minibuffer but not from the
+      ;; completing-read prompter, use just "Act"
+      act)
+     ((plist-get target :multi)
+      (format "%s on %s %ss"
+              act
+              (plist-get target :multi)
+              (plist-get target :type)))
+     (t (format
+         "%s on %s%s '%s'"
+         act
+         (plist-get target :type)
+         (if shadowed-targets
+             (format (propertize "(%s)" 'face 'shadow)
+                     (string-join
+                      (mapcar (lambda (x)
+                                (symbol-name (plist-get x :type)))
+                              shadowed-targets)
+                      ", "))
+           "")
+         (embark--truncate-target (plist-get target :target)))))))
 
 (defun embark-minimal-indicator ()
   "Minimal indicator, appearing in the minibuffer prompt or echo area.
@@ -1023,42 +1057,9 @@ the minibuffer is open, the message is added to the prompt."
       (if (null keymap)
           (when indicator-overlay
             (delete-overlay indicator-overlay))
-        (let* ((target (car targets))
-               (act (embark--act-label
-                     (eq (lookup-key keymap [13]) #'embark-done)
-                     (plist-get target :multi)))
-               (shadowed-targets (cdr targets))
-               (indicator
-                (cond
-                 ;; TODO code duplication with embark--verbose-indicator-section-target
-                 ((eq (plist-get target :type) 'embark-become)
-                  (propertize "Become" 'face 'highlight))
-                 ((and (minibufferp)
-                       (not (eq 'embark-keybinding
-                                (completion-metadata-get
-                                 (embark--metadata)
-                                 'category))))
-                  ;; we are in a minibuffer but not from the
-                  ;; completing-read prompter, use just "Act"
-                  act)
-                 ((plist-get target :multi)
-                  (format "%s on %s %ss"
-                          act
-                          (plist-get target :multi)
-                          (plist-get target :type)))
-                 (t (format
-                     "%s on %s%s '%s'"
-                     act
-                     (plist-get target :type)
-                     (if shadowed-targets
-                         (format (propertize "(%s)" 'face 'shadow)
-                                 (string-join
-                                  (mapcar (lambda (x)
-                                            (symbol-name (plist-get x :type)))
-                                          shadowed-targets)
-                                  ", "))
-                       "")
-                     (embark--truncate-target (plist-get target :target)))))))
+        (let ((indicator (embark--format-targets
+                          (car targets) (cdr targets)
+                          (eq (lookup-key keymap [13]) #'embark-done))))
           (if (not (minibufferp))
               (message "%s" indicator)
             (unless indicator-overlay
@@ -1409,25 +1410,10 @@ of all full key sequences bound in the keymap."
     (&key targets bindings &allow-other-keys)
   "Format the TARGETS section for the indicator buffer.
 BINDINGS is the formatted list of keybindings."
-  (let* ((target (plist-get (car targets) :target))
-         (kind (plist-get (car targets) :type))
-         (result (cond
-                  ;; TODO code duplication with embark-minimal-indicator
-                  ((eq kind 'embark-become)
-                   (concat (propertize "Become" 'face 'highlight)))
-                  ((plist-get (car targets) :multi)
-                   (format "%s on %s %ss"
-                           (embark--act-label nil t)
-                           (plist-get (car targets) :multi)
-                           kind))
-                  (t
-                   (format "%s on %s '%s'"
-                           (embark--act-label
-                            (seq-find (lambda (b) (eq (caddr b) #'embark-done))
-                                      bindings)
-                            nil)
-                           kind
-                           (embark--truncate-target target))))))
+  (let ((result (embark--format-targets
+                 (car targets)
+                 nil   ; the shadowed targets section deals with these
+                 (cl-find 'embark-done bindings :key #'caddr :test #'eq))))
     (add-face-text-property 0 (length result)
                             'embark-verbose-indicator-title
                             'append
@@ -1439,8 +1425,8 @@ BINDINGS is the formatted list of keybindings."
   "Format the CYCLE key section for the indicator buffer.
 SHADOWED-TARGETS is the list of other targets."
   (concat
-   (and cycle(propertize (format "(%s to cycle)" cycle)
-                         'face 'embark-verbose-indicator-shadowed))
+   (and cycle (propertize (format "(%s to cycle)" cycle)
+                          'face 'embark-verbose-indicator-shadowed))
    (and shadowed-targets "\n")))
 
 (cl-defun embark--verbose-indicator-section-shadowed-targets
@@ -3172,12 +3158,11 @@ PRED is a predicate function used to filter the items."
                    (let ((file (file-name-nondirectory path)))
                      (or (string= file ".") (string= file ".."))))
                  files)))
-  (let ((buf
-         (dired-noselect
-          (cons
-           ;; TODO: is it worth finding the deepest common containing directory?
-           (if (cl-every #'file-name-absolute-p files) "/" default-directory)
-           files))))
+  (let* ((dir (or (file-name-directory (try-completion "" files)) ""))
+         (buf (dired-noselect
+               (cons (expand-file-name dir)
+                     (mapcar (lambda (file) (string-remove-prefix dir file))
+                             files)))))
     (with-current-buffer buf
       (rename-buffer (format "*Embark Export Dired %s*" default-directory)))
     (pop-to-buffer buf)))
@@ -3999,7 +3984,6 @@ The advice is self-removing so it only affects ACTION once."
   ("h" describe-symbol)
   ("s" embark-info-lookup-symbol)
   ("d" embark-find-definition)
-  ("b" where-is)
   ("e" pp-eval-expression)
   ("a" apropos)
   ("\\" embark-history-remove))
@@ -4041,6 +4025,7 @@ The advice is self-removing so it only affects ACTION once."
   :parent embark-function-map
   ("x" execute-extended-command)
   ("I" Info-goto-emacs-command-node)
+  ("b" where-is)
   ("g" global-set-key)
   ("l" local-set-key))
 
