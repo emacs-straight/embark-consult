@@ -779,15 +779,15 @@ different priorities in `embark-target-finders'."
 
 (defun embark-target-url-at-point ()
   "Target the URL at point."
-  (if-let ((url (thing-at-point 'url)))
-      `(url ,url . ,(thing-at-point-bounds-of-url-at-point t))
-    (when-let ((url (or (get-text-property (point) 'shr-url)
-                        (get-text-property (point) 'image-url))))
+  (if-let ((url (or (get-text-property (point) 'shr-url)
+                    (get-text-property (point) 'image-url))))
       `(url ,url
             ,(previous-single-property-change
               (min (1+ (point)) (point-max)) 'mouse-face nil (point-min))
             . ,(next-single-property-change
-                (point) 'mouse-face nil (point-max))))))
+                (point) 'mouse-face nil (point-max)))
+    (when-let ((url (thing-at-point 'url)))
+      `(url ,url . ,(thing-at-point-bounds-of-url-at-point t)))))
 
 (declare-function widget-at "wid-edit")
 
@@ -1281,7 +1281,7 @@ UPDATE function is passed to it."
                       ;; embark-keybinding in the `completing-read' prompter.
                       (define-key map cycle
                         (cond
-                         ((lookup-key keymap cycle)
+                         ((eq (lookup-key keymap cycle) 'embark-cycle)
                           (lambda ()
                             (interactive)
                             (throw 'choice 'embark-cycle)))
@@ -1289,8 +1289,7 @@ UPDATE function is passed to it."
                           (lambda ()
                             (interactive)
                             (minibuffer-message
-                             (concat "Single target; can't cycle. "
-                                     "Press `%s' again to act.")
+                             "No cycling possible; press `%s' again to act."
                              (key-description cycle))
                             (define-key map cycle #'embark-act))))))
                     (when embark-keymap-prompter-key
@@ -1826,10 +1825,10 @@ minibuffer before executing the action."
       (cons 'general target)))
 
 (defun embark--refine-symbol-type (_type target)
-  "Refine symbol TARGET to command or variable if possible."
+  "Refine symbol TARGET to more specific type if possible."
   (cons (let ((symbol (intern-soft target))
               (library (ffap-el-mode target)))
-          (cond
+          (cond 
            ((and library
                  (looking-back "\\(?:require\\|use-package\\).*"
                                (line-beginning-position)))
@@ -1838,11 +1837,13 @@ minibuffer before executing the action."
            ((commandp symbol) 'command)
            ((and symbol (boundp symbol)) 'variable)
            ;; Prefer variables over functions for backward compatibility.
-           ;; Command > variable > function > symbol seems like a
-           ;; reasonable order with decreasing usefulness of the actions.
+           ;; Command > variable > function > face > library > package > symbol
+           ;; seems like a reasonable order with decreasing usefulness
+           ;; of the actions.
            ((fboundp symbol) 'function)
            ((facep symbol) 'face)
            (library 'library)
+           ((and (featurep 'package) (embark--package-desc symbol)) 'package)
            (t 'symbol)))
         target))
 
@@ -3317,7 +3318,7 @@ Return the category metadatum as the type of the target."
   (add-hook 'embark-target-finders #'embark--ivy-selected)
   (add-hook 'embark-candidate-collectors #'embark--ivy-candidates))
 
-;;; Custom actions open-line open-line
+;;; Custom actions 
 
 (defun embark-keymap-help ()
   "Prompt for an action to perform or command to become and run it."
@@ -3579,6 +3580,7 @@ The search respects symbol boundaries."
   (compose-mail address))
 
 (autoload 'pp-display-expression "pp")
+
 (defun embark-pp-eval-defun (edebug)
   "Run `eval-defun' and pretty print the result.
 With a prefix argument EDEBUG, instrument the code for debugging."
@@ -3646,6 +3648,17 @@ ALGORITHM is the hash algorithm symbol understood by `secure-hash'."
   (interactive "r")
   (let ((epa-replace-original-text t))
     (epa-decrypt-region start end)))
+
+(defvar eww-download-directory)
+(autoload 'eww-download-callback "eww")
+
+(defun embark-download-url (url)
+  "Download URL to `eww-download-directory'."
+  (interactive "sDownload URL: ")
+  (let ((dir eww-download-directory))
+    (when (functionp dir) (setq dir (funcall dir)))
+    (access-file dir "Download failed")
+    (url-retrieve url #'eww-download-callback (list url dir))))
 
 ;;; Setup and pre-action hooks
 
@@ -3860,6 +3873,7 @@ The advice is self-removing so it only affects ACTION once."
   "Keymap for Embark file actions."
   ("RET" find-file)
   ("f" find-file)
+  ("F" find-file-literally)
   ("o" find-file-other-window)
   ("d" delete-file)
   ("D" delete-directory)
@@ -3889,6 +3903,7 @@ The advice is self-removing so it only affects ACTION once."
   "Keymap for Embark url actions."
   ("RET" browse-url)
   ("b" browse-url)
+  ("d" embark-download-url)
   ("e" eww))
 
 (embark-define-keymap embark-email-map
