@@ -359,6 +359,13 @@ prescribe a default for commands not used as alist keys."
                  (alist :key-type (choice function (const t))
                         :value-type boolean)))
 
+(defcustom embark-confirm-act-all t
+  "Should `embark-act-all' prompt the user for confirmation?
+Even if this variable is nil you may still be prompted to confirm
+some uses of `embark-act-all', namely, for those actions whose
+entry in `embark-pre-action-hooks' includes `embark--confirm'."
+  :type 'boolean)
+
 (defcustom embark-default-action-overrides nil
   "Alist associating target types with overriding default actions.
 When the source of a target is minibuffer completion, the default
@@ -482,6 +489,8 @@ the key :always are executed always."
     (delete-directory embark--confirm)
     (kill-buffer embark--confirm)
     (embark-kill-buffer-and-window embark--confirm)
+    (bookmark-delete embark--confirm)
+    (package-delete embark--confirm)
     ;; search for region contents outside said region
     (embark-isearch embark--unmark-target)
     (occur embark--unmark-target)
@@ -704,6 +713,8 @@ There are three kinds:
 ;;; Core functionality
 
 (defconst embark--verbose-indicator-buffer " *Embark Actions*")
+
+(defvar embark--minimal-indicator-overlay nil)
 
 (defun embark--metadata ()
   "Return current minibuffer completion metadata."
@@ -1059,25 +1070,26 @@ This indicator displays a message showing the types of all
 targets, starting with the current target, and the value of the
 current target.  The message is displayed in the echo area, or if
 the minibuffer is open, the message is added to the prompt."
-  (let ((indicator-overlay))
-    (lambda (&optional keymap targets _prefix)
-      (if (null keymap)
-          (when indicator-overlay
-            (delete-overlay indicator-overlay))
-        (let ((indicator (embark--format-targets
-                          (car targets) (cdr targets)
-                          (eq (lookup-key keymap [13]) #'embark-done))))
-          (if (not (minibufferp))
-              (message "%s" indicator)
-            (unless indicator-overlay
-              (setq indicator-overlay (make-overlay (point-min) (point-min)
-                                                    (current-buffer) t t)))
-            (overlay-put indicator-overlay
-                         'before-string (concat indicator
-                                                (if (<= (length indicator)
-                                                        (* 0.4 (frame-width)))
-                                                    " "
-                                                  "\n")))))))))
+  (lambda (&optional keymap targets _prefix)
+    (if (null keymap)
+        (when embark--minimal-indicator-overlay
+          (delete-overlay embark--minimal-indicator-overlay)
+          (setq-local embark--minimal-indicator-overlay nil))
+      (let ((indicator (embark--format-targets
+                        (car targets) (cdr targets)
+                        (eq (lookup-key keymap [13]) #'embark-done))))
+        (if (not (minibufferp))
+            (message "%s" indicator)
+          (unless embark--minimal-indicator-overlay
+            (setq-local embark--minimal-indicator-overlay
+                        (make-overlay (point-min) (point-min)
+                                      (current-buffer) t t)))
+          (overlay-put embark--minimal-indicator-overlay
+                       'before-string (concat indicator
+                                              (if (<= (length indicator)
+                                                      (* 0.4 (frame-width)))
+                                                  " "
+                                                "\n"))))))))
 
 (defun embark--read-key-sequence (update)
   "Read key sequence, call UPDATE function with prefix keys."
@@ -2134,7 +2146,7 @@ ARG is the prefix argument."
                        :orig-target orig-cand))
                (plist-get transformed :candidates)
                (plist-get transformed :orig-candidates))
-              (user-error "No candidates for export")))
+              (user-error "No candidates to act on")))
          (indicators (mapcar #'funcall embark-indicators)))
     (unwind-protect
         (let* ((action
@@ -2150,8 +2162,9 @@ ARG is the prefix argument."
           (when (and (eq action (embark--default-action type))
                      (eq action embark--command))
             (setq candidates (mapcar #'embark--orig-target candidates)))
-          (when (or (not (memq 'embark--confirm
-                               (alist-get action embark-pre-action-hooks)))
+          (when (or (not (or embark-confirm-act-all
+                             (memq 'embark--confirm
+                                   (alist-get action embark-pre-action-hooks))))
                     (y-or-n-p (format "Run %s on %d %ss? "
                                       action (length candidates) type)))
             (if (memq action embark-multitarget-actions)
