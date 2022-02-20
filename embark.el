@@ -2654,11 +2654,10 @@ in `find-file') or the command was called with a prefix argument,
 exit the minibuffer.
 
 For other Embark Collect buffers, run the default action on ENTRY."
-  (let* ((start (button-start entry))
-         (end (button-end entry))
-         (text (buffer-substring start end))) ; keep properties
-    (when (eq embark--type 'file)
-      (setq text (abbreviate-file-name (expand-file-name text))))
+  (pcase-let ((`(,type ,text ,start . ,end)
+               (save-excursion
+                 (goto-char entry)
+                 (embark-target-collect-candidate))))
     (if (and (eq embark-collect--kind :completions))
         (progn
           (select-window (active-minibuffer-window))
@@ -2674,9 +2673,9 @@ For other Embark Collect buffers, run the default action on ENTRY."
                       (= (car (embark--boundaries))
                          (embark--minibuffer-point)))
             (exit-minibuffer)))
-      (embark--act (embark--default-action embark--type)
+      (embark--act (embark--default-action type)
                    (list :target text
-                         :type embark--type
+                         :type type
                          :bounds (cons start end))))))
 
 (embark-define-keymap embark-collect-mode-map
