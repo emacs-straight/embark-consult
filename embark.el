@@ -423,7 +423,8 @@ replaced by the single `embark-allow-edit-actions' variable."
     (shell-command-on-region embark--ignore-target)
     (format-encode-region embark--ignore-target)
     (format-decode-region embark--ignore-target)
-    (xref-find-definitions embark--ignore-target))
+    (xref-find-definitions embark--ignore-target)
+    (sort-regexp-fields embark--ignore-target))
   "Alist associating commands with post-injection setup hooks.
 For commands appearing as keys in this alist, run the
 corresponding value as a setup hook after injecting the target
@@ -2165,10 +2166,12 @@ ARG is the prefix argument."
                      indicators (embark--action-keymap type nil)
                      (list (list :type type :multi (length candidates))))
                     (user-error "Canceled")))
+               (prefix prefix-arg)
                (act (lambda (candidate)
                       (cl-letf (((symbol-function 'embark--restart) #'ignore)
                                 ((symbol-function 'embark--confirm) #'ignore))
-                        (embark--act action candidate))))
+                        (let ((prefix-arg prefix))
+                          (embark--act action candidate)))))
                (quit (embark--quit-p action arg)))
           (when (and (eq action (embark--default-action type))
                      (eq action embark--command))
@@ -2179,7 +2182,8 @@ ARG is the prefix argument."
                     (y-or-n-p (format "Run %s on %d %ss? "
                                       action (length candidates) type)))
             (if (memq action embark-multitarget-actions)
-                (embark--act action transformed quit)
+                (let ((prefix-arg prefix))
+                  (embark--act action transformed quit))
               (if quit
                   (embark--quit-and-run #'mapc act candidates)
                 (mapc act candidates)
@@ -2747,6 +2751,7 @@ key binding for it.  Or alternatively you might want to enable
                                       'embark--candidate cand)
                          type embark-collect-entry)
                         (,annotation
+                         skip t
                          ,@(unless faces
                              '(face embark-collect-annotation)))]))))
              (lambda (cand)
@@ -3366,7 +3371,7 @@ Return the category metadatum as the type of the target."
   (interactive)
   (user-error "Not meant to be called directly"))
 
-(defun embark-insert (string)
+(defun embark-insert (string &optional multiline)
   "Insert STRING at point.
 Some whitespace is also inserted if necessary to avoid having the
 inserted string blend into the existing buffer text.  More
@@ -3378,27 +3383,31 @@ constituent character next to an existing word constituent.
 
 2. For a multiline inserted string, newlines may be added before
 or after as needed to ensure the inserted string is on lines of
-its own."
-  (interactive "sInsert: ")
-  (let ((multiline (string-match-p "\n" string)))
-    (cl-flet* ((maybe-space ()
-                 (and (looking-at "\\w") (looking-back "\\w" 1)
-                      (insert " ")))
-               (maybe-newline ()
-                 (or (looking-back "^[ \t]*" 40) (looking-at "\n\n")
-                     (newline-and-indent)))
-               (maybe-whitespace ()
-                 (if multiline (maybe-newline) (maybe-space)))
-               (ins-string ()
-                 (save-excursion
-                   (insert string)
-                   (when (looking-back "\n" 1) (delete-char -1))
-                   (maybe-whitespace))
-                 (maybe-whitespace)))
-      (if buffer-read-only
-          (with-selected-window (other-window-for-scrolling)
-            (ins-string))
-        (ins-string)))))
+its own.
+
+If MULTILINE is non-nil (interactively, if called with a prefix
+argument), force the behavior for of the multiline case even if
+STRING contains no newlines."
+  (interactive "sInsert: \nP")
+  (setq multiline (or multiline (string-match-p "\n" string)))
+  (cl-flet* ((maybe-space ()
+               (and (looking-at "\\w") (looking-back "\\w" 1)
+                    (insert " ")))
+             (maybe-newline ()
+               (or (looking-back "^[ \t]*" 40) (looking-at "\n\n")
+                   (newline-and-indent)))
+             (maybe-whitespace ()
+               (if multiline (maybe-newline) (maybe-space)))
+             (ins-string ()
+               (save-excursion
+                 (insert string)
+                 (when (looking-back "\n" 1) (delete-char -1))
+                 (maybe-whitespace))
+               (maybe-whitespace)))
+    (if buffer-read-only
+        (with-selected-window (other-window-for-scrolling)
+          (ins-string))
+      (ins-string))))
 
 (define-obsolete-function-alias
   'embark-save
