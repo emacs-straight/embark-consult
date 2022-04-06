@@ -684,6 +684,9 @@ This function is meant to be added to `minibuffer-setup-hook'."
 (defvar-local embark-collect--candidates nil
   "List of candidates in current collect buffer.")
 
+(defvar-local embark--export-pre-revert-hook nil
+  "Hook run before reverting an Embark Export buffer.")
+
 ;;; Core functionality
 
 (defconst embark--verbose-indicator-buffer " *Embark Actions*")
@@ -2939,19 +2942,25 @@ with key \"Embark Live\"."
 
 (defun embark--export-revert-function ()
   "Return an appropriate revert function for an export buffer in this context."
-  ;; TODO Fix this for async commands.
   (let ((buffer (or embark--target-buffer (embark--target-buffer))))
-    (cl-flet ((reverter (action)
+    (cl-flet ((reverter (wrapper)
                 (lambda (&rest _)
-                  (let ((windows (get-buffer-window-list nil nil t)))
-                    (kill-buffer)
-                    (with-current-buffer buffer
-                      (funcall action windows))))))
+                  (let ((windows (get-buffer-window-list nil nil t))
+                        (old (current-buffer))
+                        (hook embark--export-pre-revert-hook))
+                    (kill-buffer old)
+                    (with-current-buffer
+                        (if (buffer-live-p buffer) buffer (current-buffer))
+                      (funcall wrapper
+                               (lambda ()
+                                 (let ((embark--export-pre-revert-hook hook))
+                                   (run-hooks 'embark--export-pre-revert-hook))
+                                 (embark-export windows))))))))
         (if (minibufferp)
           (reverter
            (let ((command embark--command)
                  (input (minibuffer-contents-no-properties)))
-             (lambda (windows)
+             (lambda (export)
                (minibuffer-with-setup-hook
                    (lambda ()
                      (delete-minibuffer-contents)
@@ -2960,10 +2969,10 @@ with key \"Embark Live\"."
                                (lambda ()
                                  (let ((embark--command command)
                                        (embark--target-buffer buffer))
-                                   (embark-export windows)))
+                                   (funcall export)))
                                nil t))
                  (command-execute command)))))
-      (reverter #'embark-export)))))
+          (reverter #'funcall)))))
 
 ;;;###autoload
 (defun embark-export (&optional windows)
@@ -2983,6 +2992,7 @@ otherwise display it in each of the WINDOWS."
       (if (eq exporter 'embark-collect)
           (embark-collect)
         (let ((after embark-after-export-hook)
+              (cmd embark--command)
               (name (embark--descriptive-buffer-name 'export))
               (revert (embark--export-revert-function)))
           (embark--quit-and-run
@@ -2996,7 +3006,8 @@ otherwise display it in each of the WINDOWS."
                  (dolist (window windows)
                    (set-window-buffer window (current-buffer)))
                (pop-to-buffer (current-buffer)))
-             (let ((embark-after-export-hook after))
+             (let ((embark-after-export-hook after)
+                   (embark--command cmd))
                (run-hooks 'embark-after-export-hook)))))))))
 
 (defmacro embark--export-rename (buffer title &rest body)

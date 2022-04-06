@@ -118,6 +118,14 @@
 (setf (alist-get 'consult-location embark-default-action-overrides)
       #'embark-consult-goto-location)
 
+(defun embark-consult--await ()
+  "Wait for a Consult async search commmand to finish."
+  (when-let (((minibufferp))
+             (ov (car (overlays-at (- (minibuffer-prompt-end) 2)))))
+    (while (not (equal (overlay-get ov 'display) ":"))
+      (sit-for 0.3 t))
+    (sit-for 0.3 t)))
+
 (defun embark-consult-export-occur (lines)
   "Create an occur mode buffer listing LINES.
 The elements of LINES are assumed to be values of category `consult-line'."
@@ -173,6 +181,10 @@ This function is meant to be added to `embark-collect-mode-hook'."
 (defvar wgrep-header/footer-parser)
 (declare-function wgrep-setup "ext:wgrep")
 
+(embark-define-keymap embark-consult-export-grep-map
+  "A keymap for Embark Export grep-mode buffers."
+  ("g" revert-buffer))
+
 (defun embark-consult-export-grep (lines)
   "Create a grep mode buffer listing LINES."
   (let ((buf (generate-new-buffer "*Embark Export Grep*")))
@@ -182,7 +194,11 @@ This function is meant to be added to `embark-collect-mode-hook'."
       (goto-char (point-min))
       (grep-mode)
       (setq-local wgrep-header/footer-parser #'ignore)
-      (when (fboundp 'wgrep-setup) (wgrep-setup)))
+      (when (fboundp 'wgrep-setup) (wgrep-setup))
+      (add-hook 'embark--export-pre-revert-hook #'embark-consult--await nil t)
+      (use-local-map (make-composed-keymap
+                      embark-consult-export-grep-map
+                      (current-local-map))))
     (pop-to-buffer buf)))
 
 (defun embark-consult-goto-grep (location)
@@ -203,6 +219,14 @@ This function is meant to be added to `embark-collect-mode-hook'."
       #'embark-consult-goto-grep)
 (setf (alist-get 'consult-grep embark-exporters-alist)
       #'embark-consult-export-grep)
+
+;;; Support for reverting export from consult-find
+
+(defun embark-consult--wait-for-find ()
+  (when (eq embark--command 'consult-find)
+    (add-hook 'embark--export-pre-revert-hook #'embark-consult--await nil t)))
+
+(add-hook 'embark-after-export-hook #'embark-consult--wait-for-find)
 
 ;;; Support for consult-isearch
 
