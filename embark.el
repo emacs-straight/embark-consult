@@ -693,12 +693,6 @@ This function is meant to be added to `minibuffer-setup-hook'."
 (defvar embark--prompter-history nil
   "History used by the `embark-completing-read-prompter'.")
 
-(defvar-local embark-collect--candidates nil
-  "List of candidates in current collect buffer.")
-
-(defvar-local embark--export-pre-revert-hook nil
-  "Hook run before reverting an Embark Export buffer.")
-
 ;;; Core functionality
 
 (defconst embark--verbose-indicator-buffer " *Embark Actions*")
@@ -939,7 +933,7 @@ their own target finder.  See for example
                   ("Annotation" (previous-button (point)))))
                (start (button-start button))
                (end (button-end button))
-               (candidate (get-text-property start 'embark--candidate)))
+               (candidate (tabulated-list-get-id)))
       `(,embark--type
         ,(if (eq embark--type 'file)
              (abbreviate-file-name (expand-file-name candidate))
@@ -2528,13 +2522,7 @@ This makes `embark-export' work in Embark Collect buffers."
                           (lambda (ov)
                             (eq (overlay-get ov 'face) 'embark-collect-marked))
                           (overlays-in (point-min) (point-max))))))
-              (let ((fn (if (consp (car embark-collect--candidates))
-                            #'car
-                          #'identity)))
-                (mapcar (lambda (x)
-                          (get-text-property 0 'embark--candidate
-                                             (funcall fn x)))
-                        embark-collect--candidates))))))
+              (mapcar #'car tabulated-list-entries)))))
 
 (defun embark-completions-buffer-candidates ()
   "Return all candidates in a completions buffer."
@@ -2672,41 +2660,16 @@ you might prefer to change the key binding to match your other
 key binding for it. Or alternatively you might want to enable the
 embark collect direct action minor mode by adding the function
 `embark-collect-direct-action-minor-mode' to
-`embark-collect-mode-hook'.")
+`embark-collect-mode-hook'.
 
-(defun embark-collect--revert ()
-  "List view of candidates and annotations for Embark Collect buffer."
-  (let ((max-width 0)
-        (affixed (consp (car embark-collect--candidates))))
-    (if tabulated-list-use-header-line
-        (tabulated-list-init-header)
-      (setq header-line-format nil tabulated-list--header-string nil))
-    (setq tabulated-list-entries
-          (mapcar
-           (if affixed
-               (pcase-lambda (`(,cand ,prefix ,annotation))
-                 (setq max-width (max max-width (+ (string-width prefix)
-                                                   (string-width cand))))
-                 (let* ((length (length annotation))
-                        (faces (text-property-not-all
-                                0 length 'face nil annotation)))
-                   (when faces
-                     (add-face-text-property 0 length 'default t annotation))
-                   `(,cand
-                     [(,(propertize cand 'line-prefix prefix)
-                       type embark-collect-entry)
-                      (,annotation
-                       skip t
-                       ,@(unless faces
-                           '(face embark-collect-annotation)))])))
-             (lambda (cand)
-               (setq max-width (max max-width (string-width cand)))
-               `(,cand [(,cand type embark-collect-entry)])))
-           embark-collect--candidates))
-    (setq tabulated-list-format
-          (if affixed
-              `[("Candidate" ,max-width t) ("Annotation" 0 t)]
-            [("Candidate" 0 t)]))))
+Reverting an Embark Collect buffer has slightly unusual behavior
+if the buffer was obtained by running `embark-collect' from
+within a minibuffer completion session.  In that case reverting
+just restarts the completion session, that is, the command that
+opened the minibuffer is run again and the minibuffer contents
+restored.  You can then interact normally with the command,
+perhaps editing the minibuffer contents, and, if you wish, you
+can rerun `embark-collect' to get an updated buffer.")
 
 (defun embark-collect--remove-zebra-stripes ()
   "Remove highlighting of alternate rows."
@@ -2758,18 +2721,13 @@ For non-minibuffers, assume candidates are of given TYPE."
   "Get affixation function for current buffer's candidates.
 For non-minibuffers, assume candidates are of given TYPE."
   (or (embark-collect--metadatum type 'affixation-function)
-      (when-let ((annotator
-                  (embark-collect--metadatum type 'annotation-function)))
+      (let ((annotator
+             (or (embark-collect--metadatum type 'annotation-function)
+                 (cl-constantly ""))))
         (lambda (candidates)
           (mapcar (lambda (c)
                     (if-let (a (funcall annotator c)) (list c "" a) c))
                   candidates)))))
-
-(defun embark-collect-toggle-header ()
-  "Toggle the visibility of the header line of Embark Collect buffer."
-  (interactive)
-  (setq tabulated-list-use-header-line (not tabulated-list-use-header-line))
-  (revert-buffer))
 
 (defun embark-collect--marked-p (&optional location)
   "Is the candidate at LOCATION marked?
@@ -2832,9 +2790,32 @@ candidate."
                   ;; avoid allocation for full string
                   (push (substring string pos inv) chunks)))
               (setq pos inv))))))
-    (propertize
-     (if chunks (apply #'concat (nreverse chunks)) string)
-     'embark--candidate string)))
+    (if chunks (apply #'concat (nreverse chunks)) string)))
+
+(defun embark-collect--format-entries (candidates)
+  "Format CANDIDATES for `tabulated-list-mode'."
+  (let ((max-width 0))
+    (setq tabulated-list-entries
+          (mapcar
+           (pcase-lambda (`(,cand ,prefix ,annotation))
+             (let* ((display (embark--for-display cand))
+                    (length (length annotation))
+                    (faces (text-property-not-all
+                            0 length 'face nil annotation)))
+               (setq max-width (max max-width (+ (string-width prefix)
+                                                 (string-width display))))
+               (when faces
+                 (add-face-text-property 0 length 'default t annotation))
+               `(,cand
+                 [(,(propertize display 'line-prefix prefix)
+                   type embark-collect-entry)
+                  (,annotation
+                   skip t
+                   ,@(unless faces
+                       '(face embark-collect-annotation)))])))
+           candidates))
+    (setq tabulated-list-format
+          `[("Candidate" ,max-width t) ("Annotation" 0 t)])))
 
 (defun embark-collect--update-candidates (buffer)
   "Update candidates for Embark Collect BUFFER."
@@ -2849,22 +2830,19 @@ candidate."
                         (let ((rel (file-relative-name cand dir)))
                           (if (string-prefix-p "../" rel) cand rel)))
                       candidates))))
-    (when affixator (setq candidates (funcall affixator candidates)))
-    (setq candidates
-          (if (stringp (car candidates))
-              (mapcar #'embark--for-display candidates)
-            (mapcar (pcase-lambda (`(,cand ,prefix ,annotation))
-                      (list (embark--for-display cand) prefix annotation))
-                    candidates)))
+    (setq candidates (funcall affixator candidates))
     (with-current-buffer buffer
-      (setq embark--type type embark-collect--candidates candidates))))
+      (setq embark--type type)
+      (embark-collect--format-entries candidates))
+    candidates))
 
 (defun embark--collect (buffer-name)
   "Create an Embark Collect buffer named BUFFER-NAME.
 
 The function `generate-new-buffer-name' is used to ensure the
 buffer has a unique name."
-  (let ((buffer (generate-new-buffer buffer-name)))
+  (let ((buffer (generate-new-buffer buffer-name))
+        (revert (embark--revert-function #'embark-collect)))
     (with-current-buffer buffer
       ;; we'll run the mode hooks once the buffer is displayed, so
       ;; the hooks can make use of the window
@@ -2875,15 +2853,17 @@ buffer has a unique name."
       (user-error "No candidates to collect"))
 
     (with-current-buffer buffer
-      (setq tabulated-list-use-header-line nil) ; default to no header
-      (add-hook 'tabulated-list-revert-hook #'embark-collect--revert nil t)
+      (setq tabulated-list-use-header-line nil ; default to no header
+            header-line-format nil
+            tabulated-list--header-string nil)
+      (setq revert-buffer-function revert)
       (when (memq embark--type embark-collect-zebra-types)
         (embark-collect-zebra-minor-mode)))
 
     (let ((window (display-buffer buffer)))
       (with-selected-window window
         (run-mode-hooks)
-        (revert-buffer))
+        (tabulated-list-revert))
       (set-window-dedicated-p window t)
       buffer)))
 
@@ -2902,7 +2882,16 @@ TYPE should be either `collect' or `export'."
   "Create an Embark Collect buffer.
 
 To control the display, add an entry to `display-buffer-alist'
-with key \"Embark Collect\"."
+with key \"Embark Collect\".
+
+Reverting an Embark Collect buffer has slightly unusual behavior
+if the buffer was obtained by running `embark-collect' from
+within a minibuffer completion session.  In that case reverting
+just restarts the completion session, that is, the command that
+opened the minibuffer is run again and the minibuffer contents
+restored.  You can then interact normally with the command,
+perhaps editing the minibuffer contents, and, if you wish, you
+can rerun `embark-collect' to get an updated buffer."
   (interactive)
   (let ((buffer (embark--collect (embark--descriptive-buffer-name 'collect))))
     (when (minibufferp)
@@ -2940,54 +2929,50 @@ with key \"Embark Live\"."
                          (embark-collect--update-candidates live-buffer)
                          (with-current-buffer live-buffer
                            ;; TODO figure out why I can't restore point
-                           (tabulated-list-print nil t))
+                           (tabulated-list-print t t))
                          (setq timer nil))))))))
     (add-hook 'after-change-functions run-collect nil t)
     (when (minibufferp)
       (add-hook 'change-major-mode-hook stop-collect nil t))))
 
-(defun embark--export-revert-function ()
-  "Return an appropriate revert function for an export buffer in this context."
-  (let ((buffer (or embark--target-buffer (embark--target-buffer))))
-    (cl-flet ((reverter (wrapper)
+(defun embark--revert-function (kind)
+  "Return a revert function for an export or collect buffer in this context.
+The parameter KIND should be either `embark-export' or `embark-collect'."
+  (let ((buffer (or embark--target-buffer (embark--target-buffer)))
+        (command embark--command))
+    (cl-flet ((reverter (action)
                 (lambda (&rest _)
-                  (let ((windows (get-buffer-window-list nil nil t))
-                        (old (current-buffer))
-                        (hook embark--export-pre-revert-hook))
-                    (kill-buffer old)
-                    (with-current-buffer
-                        (if (buffer-live-p buffer) buffer (current-buffer))
-                      (funcall wrapper
-                               (lambda ()
-                                 (let ((embark--export-pre-revert-hook hook))
-                                   (run-hooks 'embark--export-pre-revert-hook))
-                                 (embark-export windows))))))))
+                  (quit-window 'kill-buffer)
+                  (with-current-buffer
+                      (if (buffer-live-p buffer) buffer (current-buffer))
+                    (let ((embark--command command))
+                      (funcall action))))))
         (if (minibufferp)
           (reverter
-           (let ((command embark--command)
-                 (input (minibuffer-contents-no-properties)))
-             (lambda (export)
+           (let ((input (minibuffer-contents-no-properties)))
+             (lambda ()
                (minibuffer-with-setup-hook
                    (lambda ()
                      (delete-minibuffer-contents)
-                     (insert input)
-                     (add-hook 'post-command-hook
-                               (lambda ()
-                                 (let ((embark--command command)
-                                       (embark--target-buffer buffer))
-                                   (funcall export)))
-                               nil t))
-                 (command-execute command)))))
-          (reverter #'funcall)))))
+                     (insert input))
+                 (setq this-command embark--command)
+                 (command-execute embark--command)))))
+          (reverter kind)))))
 
 ;;;###autoload
-(defun embark-export (&optional windows)
+(defun embark-export ()
   "Create a type-specific buffer to manage current candidates.
 The variable `embark-exporters-alist' controls how to make the
 buffer for each type of completion.
 
-If WINDOWS is nil, display the buffer using `pop-to-buffer',
-otherwise display it in each of the WINDOWS."
+Reverting an Embark Export buffer has slightly unusual behavior if
+the buffer was obtained by running `embark-export' from within a
+minibuffer completion session.  In that case reverting just
+restarts the completion session, that is, the command that opened
+the minibuffer is run again and the minibuffer contents restored.
+You can then interact normally with the command, perhaps editing
+the minibuffer contents, and, if you wish, you can rerun
+`embark-export' to get an updated buffer."
   (interactive)
   (let* ((transformed (embark--maybe-transform-candidates))
          (candidates (or (plist-get transformed :candidates)
@@ -3000,7 +2985,7 @@ otherwise display it in each of the WINDOWS."
         (let ((after embark-after-export-hook)
               (cmd embark--command)
               (name (embark--descriptive-buffer-name 'export))
-              (revert (embark--export-revert-function)))
+              (revert (embark--revert-function #'embark-export)))
           (embark--quit-and-run
            (lambda ()
              (let ((display-buffer-alist
@@ -3008,10 +2993,7 @@ otherwise display it in each of the WINDOWS."
                (funcall exporter candidates))
              (rename-buffer name t)
              (setq-local revert-buffer-function revert)
-             (if windows
-                 (dolist (window windows)
-                   (set-window-buffer window (current-buffer)))
-               (pop-to-buffer (current-buffer)))
+             (pop-to-buffer (current-buffer))
              (let ((embark-after-export-hook after)
                    (embark--command cmd))
                (run-hooks 'embark-after-export-hook)))))))))
