@@ -493,7 +493,10 @@ the key :always are executed always."
     (query-replace embark--beginning-of-target embark--unmark-target)
     (query-replace-regexp embark--beginning-of-target embark--unmark-target)
     ;; narrow to target for duration of action
-    (repunctuate-sentences embark--narrow-to-target))
+    (repunctuate-sentences embark--narrow-to-target)
+    ;; use directory of target as default-directory
+    (shell embark--cd embark--universal-argument)
+    (eshell embark--cd embark--universal-argument))
   "Alist associating commands with pre-action hooks.
 The hooks are run right before an action is embarked upon.  See
 `embark-target-injection-hooks' for information about the hook
@@ -1751,12 +1754,16 @@ arguments are passed to the hooks as keyword arguments."
   "Perform ACTION injecting the TARGET.
 If called from a minibuffer with non-nil QUIT, quit the
 minibuffer before executing the action."
-  (if (memq action '(embark-become       ; these actions should not
-                     embark-collect
-                     embark-live
+  (if (memq action '(embark-become       ; these actions should run in
+                     embark-collect      ; the current buffer, not the
+                     embark-live         ; target buffer
                      embark-export
                      embark-act-all))
-      (command-execute action)
+      (progn
+        (embark--run-action-hooks embark-pre-action-hooks action target quit)
+        (unwind-protect (command-execute action)
+          (embark--run-action-hooks embark-post-action-hooks
+                                    action target quit)))
     (let* ((command embark--command)
            (prefix prefix-arg)
            (action-window (embark--target-window t))
@@ -2989,12 +2996,9 @@ the minibuffer contents, and, if you wish, you can rerun
               (revert (embark--revert-function #'embark-export)))
           (embark--quit-and-run
            (lambda ()
-             (let ((display-buffer-alist
-                    '(("" display-buffer-no-window (allow-no-window . t)))))
-               (funcall exporter candidates))
+             (funcall exporter candidates)
              (rename-buffer name t)
              (setq-local revert-buffer-function revert)
-             (pop-to-buffer (current-buffer))
              (let ((embark-after-export-hook after)
                    (embark--command cmd))
                (run-hooks 'embark-after-export-hook)))))))))
@@ -3272,15 +3276,6 @@ STRING contains no newlines."
         (with-selected-window (other-window-for-scrolling)
           (ins-string))
       (ins-string))))
-
-(defun embark-eshell (file)
-  "Run eshell in directory of FILE."
-  (interactive "GDirectory: ")
-  (let ((default-directory
-          (file-name-directory
-           (expand-file-name
-            (substitute-in-file-name file)))))
-    (eshell '(4))))
 
 ;; For Emacs 28 dired-jump will be moved to dired.el, but it seems
 ;; that since it already has an autoload in Emacs 28, this next
@@ -3660,6 +3655,32 @@ The advice is self-removing so it only affects ACTION once."
   (unless (y-or-n-p (format "Run %s on %s? " action target))
     (user-error "Cancelled")))
 
+(autoload 'bookmark-location "bookmark")
+(cl-defun embark--cd (&key action target type &allow-other-keys)
+  "Run ACTION with `default-directory' set to the directory of TARGET.
+The supported values of TYPE are file, buffer, bookmark and
+library, which have an obvious notion of associated directory."
+  (when-let (((symbolp action))
+             (directory
+              (pcase type
+                ('file
+                 (file-name-directory target))
+                ('buffer
+                 (buffer-local-value 'default-directory (get-buffer target)))
+                ('bookmark
+                 (file-name-directory (bookmark-location target)))
+                ('library
+                 (file-name-directory (locate-library target))))))
+    (cl-labels ((in-directory (fn &rest args)
+                  (advice-remove action #'in-directory)
+                  (let ((default-directory directory))
+                    (apply fn args))))
+      (advice-add action :around #'in-directory))))
+
+(defun embark--universal-argument (&rest _)
+  "Run action with a universal prefix argument."
+  (setq prefix-arg '(4)))
+
 ;;; keymaps
 
 (embark-define-keymap embark-meta-map
@@ -3796,7 +3817,7 @@ The advice is self-removing so it only affects ACTION once."
   ("j" embark-dired-jump)
   ("!" shell-command)
   ("&" async-shell-command)
-  ("$" embark-eshell)
+  ("$" eshell)
   ("<" insert-file)
   ("m" chmod)
   ("=" ediff-files)
@@ -3834,7 +3855,8 @@ The advice is self-removing so it only affects ACTION once."
   ("h" finder-commentary)
   ("a" apropos-library)
   ("L" locate-library)
-  ("m" info-display-manual))
+  ("m" info-display-manual)
+  ("$" eshell))
 
 (embark-define-keymap embark-buffer-map
   "Keymap for Embark buffer actions."
@@ -3847,7 +3869,8 @@ The advice is self-removing so it only affects ACTION once."
   ("r" embark-rename-buffer)
   ("=" ediff-buffers)
   ("|" embark-shell-command-on-buffer)
-  ("<" insert-buffer))
+  ("<" insert-buffer)
+  ("$" eshell))
 
 (embark-define-keymap embark-tab-map
   "Keymap for actions for tab-bar tabs."
@@ -3995,7 +4018,8 @@ The advice is self-removing so it only affects ACTION once."
   ("o" bookmark-jump-other-window)
   ("f" bookmark-jump-other-frame)
   ("a" 'bookmark-show-annotation)
-  ("e" 'bookmark-edit-annotation))
+  ("e" 'bookmark-edit-annotation)
+  ("$" eshell))
 
 (embark-define-keymap embark-unicode-name-map
   "Keymap for Embark unicode name actions."

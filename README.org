@@ -1,7 +1,7 @@
 #+TITLE: Embark: Emacs Mini-Buffer Actions Rooted in Keymaps
 #+OPTIONS: d:nil
 #+EXPORT_FILE_NAME: embark.texi
-#+TEXINFO_DIR_CATEGORY: Emacs
+#+TEXINFO_DIR_CATEGORY: Emacs misc features
 #+TEXINFO_DIR_TITLE: Embark: (embark).
 #+TEXINFO_DIR_DESC: Emacs Mini-Buffer Actions Rooted in Keymaps
 
@@ -555,6 +555,11 @@ For pre-action hooks:
   marker stack. Use this for commands that take you somewhere and for
   which you'd like to be able to come back to where you were using
   =xref-pop-marker-stack=. This is used by default for =find-library=.
+
+- =embark--cd= :: Run the action with =default-directory= set to the
+  directory associated to the current target. The target should be of
+  type =file=, =buffer=, =bookmark= or =library=, and the associated directory
+  is what you'd expect in each case.
 
 For post-action hooks:
 
