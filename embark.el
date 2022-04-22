@@ -1990,15 +1990,13 @@ keymap for the given type."
     :target (plist-get target :orig-target))
    :type (plist-get target :orig-type)))
 
-(defun embark--quit-p (action &optional negate)
+(defun embark--quit-p (action)
   "Determine whether to quit the minibuffer after ACTION.
 This function consults `embark-quit-after-action' to decide
 whether or not the user wishes to quit the minibuffer after
-performing the ACTION, assuming this is done from a minibuffer.
-If NEGATE is non-nil, return the opposite value."
+performing the ACTION, assuming this is done from a minibuffer."
   (let* ((cfg embark-quit-after-action)
          (quit (if (consp cfg) (alist-get action cfg (alist-get t cfg)) cfg)))
-    (when negate (setq quit (not quit))) ; Emacs 27.1 has an xor function...
     (when embark--toggle-quit (setq quit (not quit)))
     (setq embark--toggle-quit nil)
     quit))
@@ -2031,8 +2029,10 @@ target."
   (let* ((targets (or (embark--targets) (user-error "No target found")))
          (indicators (mapcar #'funcall embark-indicators))
          (default-done nil))
-    (when (and arg (not (minibufferp)))
-      (setq targets (embark--rotate targets (prefix-numeric-value arg))))
+    (when arg
+      (if (minibufferp)
+          (embark-toggle-quit)
+        (setq targets (embark--rotate targets (prefix-numeric-value arg)))))
     (unwind-protect
         (while
             (let* ((target (car targets))
@@ -2070,7 +2070,7 @@ target."
                                 (eq action embark--command))
                            (embark--orig-target target)
                          target)
-                       (embark--quit-p action arg))
+                       (embark--quit-p action))
                     (user-error
                      (funcall (if repeat #'message #'user-error)
                               "%s" (cadr err))))
@@ -2154,6 +2154,7 @@ ARG is the prefix argument."
                (plist-get transformed :orig-candidates))
               (user-error "No candidates to act on")))
          (indicators (mapcar #'funcall embark-indicators)))
+    (when arg (embark-toggle-quit))
     (unwind-protect
         (let* ((action
                 (or (embark--prompt
@@ -2166,7 +2167,7 @@ ARG is the prefix argument."
                                 ((symbol-function 'embark--confirm) #'ignore))
                         (let ((prefix-arg prefix))
                           (embark--act action candidate)))))
-               (quit (embark--quit-p action arg)))
+               (quit (embark--quit-p action)))
           (when (and (eq action (embark--default-action type))
                      (eq action embark--command))
             (setq candidates (mapcar #'embark--orig-target candidates)))
@@ -2258,11 +2259,12 @@ See `embark-act' for the meaning of the prefix ARG."
                    targets)))
              (default-action (embark--default-action (plist-get target :type)))
              (action (or (command-remapping default-action) default-action)))
+        (when (and arg (minibufferp)) (setq embark--toggle-quit t))
         (embark--act action
                      (if (eq default-action embark--command)
                          (embark--orig-target target)
                        target)
-                     (embark--quit-p action arg)))
+                     (embark--quit-p action)))
     (user-error "No target found")))
 
 (defun embark--become-keymap ()
@@ -2637,15 +2639,7 @@ If NESTED is non-nil subkeymaps are not flattened."
      (substring contents pt))))
 
 (defun embark-collect-choose (entry)
-  "Select a completion or run default action on Embark Collect ENTRY.
-
-If the current buffer is an Embark Collect Completions buffer,
-complete the minibuffer input to ENTRY and, unless this leads to
-new completion candidates (for example, when entering a directory
-in `find-file') or the command was called with a prefix argument,
-exit the minibuffer.
-
-For other Embark Collect buffers, run the default action on ENTRY."
+  "Run default action on Embark Collect ENTRY."
   (pcase-let ((`(,type ,text ,start . ,end)
                (save-excursion
                  (goto-char entry)
@@ -3256,7 +3250,12 @@ Return the category metadatum as the type of the target."
   (interactive)
   (when (minibufferp)
     (setq embark--toggle-quit (not embark--toggle-quit))
-    (message "Quitting toggled.")))
+    (if (consp embark-quit-after-action)
+        (message "Will %sobey embark-quit-after-action."
+                 (if embark--toggle-quit "dis" ""))
+      (message
+       "Will %squit minibuffer after action"
+       (if (eq embark--toggle-quit embark-quit-after-action) "not " "")))))
 
 (defun embark-insert (string &optional multiline)
   "Insert STRING at point.
