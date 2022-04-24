@@ -2887,7 +2887,7 @@ TYPE should be either `collect' or `export'."
   (format "*Embark %s: %s*"
           (capitalize (symbol-name type))
           (if (minibufferp)
-              (format "M-x %s RET %s" embark--command
+              (format "%s - %s" embark--command
                       (minibuffer-contents-no-properties))
             (buffer-name))))
 
@@ -2999,10 +2999,13 @@ the minibuffer contents, and, if you wish, you can rerun
         (let ((after embark-after-export-hook)
               (cmd embark--command)
               (name (embark--descriptive-buffer-name 'export))
-              (revert (embark--revert-function #'embark-export)))
+              (revert (embark--revert-function #'embark-export))
+              (buffer (save-excursion
+                        (funcall exporter candidates)
+                        (current-buffer))))
           (embark--quit-and-run
            (lambda ()
-             (funcall exporter candidates)
+             (pop-to-buffer buffer)
              (rename-buffer name t)
              (setq-local revert-buffer-function revert)
              (let ((embark-after-export-hook after)
@@ -3673,22 +3676,27 @@ The advice is self-removing so it only affects ACTION once."
   (unless (y-or-n-p (format "Run %s on %s? " action target))
     (user-error "Cancelled")))
 
+(defun embark--associated-directory (target type)
+  "Return directory associated to TARGET of given TYPE.
+The supported values of TYPE are file, buffer, bookmark and
+library, which have an obvious notion of associated directory."
+  (pcase type
+    ('file
+     (file-name-directory target))
+    ('buffer
+     (buffer-local-value 'default-directory (get-buffer target)))
+    ('bookmark
+     (file-name-directory (bookmark-location target)))
+    ('library
+     (file-name-directory (locate-library target)))))
+
 (autoload 'bookmark-location "bookmark")
 (cl-defun embark--cd (&key action target type &allow-other-keys)
   "Run ACTION with `default-directory' set to the directory of TARGET.
 The supported values of TYPE are file, buffer, bookmark and
 library, which have an obvious notion of associated directory."
   (when-let (((symbolp action))
-             (directory
-              (pcase type
-                ('file
-                 (file-name-directory target))
-                ('buffer
-                 (buffer-local-value 'default-directory (get-buffer target)))
-                ('bookmark
-                 (file-name-directory (bookmark-location target)))
-                ('library
-                 (file-name-directory (locate-library target))))))
+             (directory (embark--associated-directory target type)))
     (cl-labels ((in-directory (fn &rest args)
                   (advice-remove action #'in-directory)
                   (let ((default-directory directory))

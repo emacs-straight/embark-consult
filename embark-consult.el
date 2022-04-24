@@ -171,8 +171,8 @@ This function is meant to be added to `embark-collect-mode-hook'."
 (defvar wgrep-header/footer-parser)
 (declare-function wgrep-setup "ext:wgrep")
 
-(embark-define-keymap embark-consult-export-grep-map
-  "A keymap for Embark Export grep-mode buffers."
+(embark-define-keymap embark-consult-revert-map
+  "A keymap with a binding for revert-buffer."
   :parent nil
   ("g" revert-buffer))
 
@@ -187,7 +187,7 @@ This function is meant to be added to `embark-collect-mode-hook'."
       ;; Set up keymap before possible wgrep-setup, so that wgrep
       ;; restores our binding too when the user finishes editing.
       (use-local-map (make-composed-keymap
-                      embark-consult-export-grep-map
+                      embark-consult-revert-map
                       (current-local-map)))
       (setq-local wgrep-header/footer-parser #'ignore)
       (when (fboundp 'wgrep-setup) (wgrep-setup)))
@@ -211,6 +211,43 @@ This function is meant to be added to `embark-collect-mode-hook'."
       #'embark-consult-goto-grep)
 (setf (alist-get 'consult-grep embark-exporters-alist)
       #'embark-consult-export-grep)
+
+;;; Support for consult-xref
+
+(declare-function xref--show-xref-buffer "ext:xref")
+
+(defun embark-consult-export-xref (items)
+  "Create an xref buffer listing ITEMS."
+  (cl-flet ((xref-items (items)
+              (mapcar (lambda (item) (get-text-property 0 'consult-xref item))
+                      items)))
+    (let ((fetcher consult-xref--fetcher)
+          (input (minibuffer-contents)))
+      (set-buffer
+       (xref--show-xref-buffer
+        (lambda ()
+          (catch 'xref-items
+            (minibuffer-with-setup-hook
+                (lambda ()
+                  (insert input)
+                  (add-hook 'minibuffer-exit-hook
+                            (lambda ()
+                              (throw 'xref-items
+                                (xref-items
+                                 (or
+                                  (plist-get
+                                   (embark--maybe-transform-candidates)
+                                   :candidates)
+                                  (user-error "No candidates for export")))))
+                            nil t))
+              (consult-xref fetcher))))
+        `((fetched-xrefs . ,(xref-items items))
+          (window . ,(embark--target-window))
+          (auto-jump . ,xref-auto-jump-to-first-xref)
+          (display-action)))))))
+
+(setf (alist-get 'consult-xref embark-exporters-alist)
+      #'embark-consult-export-xref)
 
 ;;; Support for consult-find and consult-locate
 
@@ -288,26 +325,33 @@ This is intended to be used in `embark-target-injection-hooks'."
   (cl-pushnew #'embark-consult--unique-match
               (alist-get cmd embark-target-injection-hooks)))
 
-(defun embark-consult--add-async-separator (&rest _)
-  "Add Consult's async separator at the beginning.
-This is intended to be used in `embark-target-injection-hooks' for any action
-that is a Consult async command."
+(cl-defun embark-consult--prep-async (&key type target &allow-other-keys)
+  "Either add Consult's async separator or ignore the TARGET depending on TYPE.
+If the TARGET of the given TYPE has an associated notion of
+directory, we don't want to search for the text of target, but
+rather just start a search in the associated directory.
+
+This is intended to be used in `embark-target-injection-hooks'
+for any action that is a Consult async command."
   (let* ((style (alist-get consult-async-split-style
                            consult-async-split-styles-alist))
          (initial (plist-get style :initial))
-         (separator (plist-get style :separator)))
-    (cond
-     (initial
+         (separator (plist-get style :separator))
+         (directory (embark--associated-directory target type)))
+    (when directory
+      (delete-minibuffer-contents))
+    (when initial
       (goto-char (minibuffer-prompt-end))
       (insert initial)
       (goto-char (point-max)))
-     (separator
+    (when (and separator (null directory))
       (goto-char (point-max))
-      (insert separator)))))
+      (insert separator))))
 
 (map-keymap
  (lambda (_key cmd)
-   (cl-pushnew #'embark-consult--add-async-separator
+   (cl-pushnew #'embark--cd (alist-get cmd embark-pre-action-hooks))
+   (cl-pushnew #'embark-consult--prep-async
                (alist-get cmd embark-target-injection-hooks)))
  embark-consult-async-search-map)
 
