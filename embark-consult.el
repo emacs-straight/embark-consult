@@ -215,6 +215,8 @@ This function is meant to be added to `embark-collect-mode-hook'."
 ;;; Support for consult-xref
 
 (declare-function xref--show-xref-buffer "ext:xref")
+(declare-function consult-xref "ext:consult-xref")
+(defvar consult-xref--fetcher)
 
 (defun embark-consult-export-xref (items)
   "Create an xref buffer listing ITEMS."
@@ -226,21 +228,25 @@ This function is meant to be added to `embark-collect-mode-hook'."
       (set-buffer
        (xref--show-xref-buffer
         (lambda ()
-          (catch 'xref-items
-            (minibuffer-with-setup-hook
-                (lambda ()
-                  (insert input)
-                  (add-hook 'minibuffer-exit-hook
-                            (lambda ()
-                              (throw 'xref-items
-                                (xref-items
-                                 (or
-                                  (plist-get
-                                   (embark--maybe-transform-candidates)
-                                   :candidates)
-                                  (user-error "No candidates for export")))))
-                            nil t))
-              (consult-xref fetcher))))
+          (let ((candidates (funcall fetcher)))
+            (if (null (cdr candidates))
+                candidates
+              (catch 'xref-items
+                (minibuffer-with-setup-hook
+                    (lambda ()
+                      (insert input)
+                      (add-hook
+                       'minibuffer-exit-hook
+                       (lambda ()
+                         (throw 'xref-items
+                           (xref-items
+                            (or
+                             (plist-get
+                              (embark--maybe-transform-candidates)
+                              :candidates)
+                             (user-error "No candidates for export")))))
+                       nil t))
+                  (consult-xref fetcher))))))
         `((fetched-xrefs . ,(xref-items items))
           (window . ,(embark--target-window))
           (auto-jump . ,xref-auto-jump-to-first-xref)
