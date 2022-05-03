@@ -113,7 +113,7 @@
 
 (eval-when-compile (require 'subr-x))
 
-(require 'ffap) ; used it to recognize file and url targets
+(require 'ffap) ; used to recognize file and url targets
 
 ;;; User facing options
 
@@ -380,14 +380,13 @@ wre obtained from a `delete-file' prompt.  In that case you can
 configure that by adding an entry to this variable pairing `file'
 with `find-file'.
 
-In addition to target types, you can also use as keys in this
-alist, pairs of a target type and a command name.  Such a pair
-indicates that the override only applies if the target was
-obtained from minibuffer completion from that command.  For
-example adding an entry '((file . delete-file) . find-file) to
-this alist would indicate that for files at the prompt of the
-`delete-file' command, `find-file' should be used as the default
-action."
+In addition to target types, you can also use as keys in this alist,
+pairs of a target type and a command name. Such a pair indicates that
+the override only applies if the target was obtained from minibuffer
+completion from that command. For example adding an
+entry (cons (cons 'file 'delete-file) 'find-file) to this alist would
+indicate that for files at the prompt of the `delete-file' command,
+`find-file' should be used as the default action."
   :type '(alist :key-type (choice (symbol :tag "Type")
                                   (cons (symbol :tag "Type")
                                         (symbol :tag "Command")))
@@ -2428,7 +2427,24 @@ The commands that prompt for a string separator are
 `embark-insert' and `embark-copy-as-kill'.")
 
 (defface embark-collect-candidate '((t :inherit default))
-  "Face for candidates in Embark Collect.")
+  "Face for candidates in Embark Collect buffers.")
+
+(defface embark-collect-group-title
+  '((t :inherit shadow :slant italic))
+  "Face for group titles in Embark Collect buffers.")
+
+(defface embark-collect-group-separator
+  '((t :inherit shadow :strike-through t italic))
+  "Face for group titles in Embark Collect buffers.")
+
+(defcustom embark-collect-group-format
+  (concat
+   (propertize "    " 'face 'embark-collect-group-separator)
+   (propertize " %s " 'face 'embark-collect-group-title)
+   (propertize " " 'face 'completions-group-separator
+               'display '(space :align-to right)))
+  "Format string used for the group title in Embark Collect buffers."
+  :type 'string)
 
 (defface embark-collect-zebra-highlight
   '((default :extend t)
@@ -2555,7 +2571,7 @@ This makes `embark-export' work in Embark Collect buffers."
                           (lambda (ov)
                             (eq (overlay-get ov 'face) 'embark-collect-marked))
                           (overlays-in (point-min) (point-max))))))
-              (mapcar #'car tabulated-list-entries)))))
+              (delq nil (mapcar #'car tabulated-list-entries))))))
 
 (defun embark-completions-buffer-candidates ()
   "Return all candidates in a completions buffer."
@@ -2588,15 +2604,23 @@ This makes `embark-export' work in Embark Collect buffers."
                 (forward-line))
               (nreverse symbols))))))
 
+
+(defun embark-collect--target ()
+  "Return the Embark Collect candidate at point.
+This takes into account `embark-transformer-alist'."
+  (let ((embark-target-finders '(embark-target-collect-candidate)))
+    (car (embark--targets))))
+
 (defun embark--action-command (action)
   "Turn an ACTION into a command to perform the action.
 Returns the name of the command."
   (let ((name (intern (format "embark-action--%s"
-                              (embark--command-name action)))))
-    (fset name (lambda ()
-                 (interactive)
-                 (when-let (target (car (embark--targets)))
-                   (embark--act action target))))
+                              (embark--command-name action))))) 
+    (fset name (lambda (arg)
+                 (interactive "P")
+                 (when-let (target (embark-collect--target))
+                   (let ((prefix-arg arg))
+                     (embark--act action target)))))
     (put name 'function-documentation (documentation action))
     name))
 
@@ -2611,33 +2635,54 @@ If NESTED is non-nil subkeymaps are not flattened."
          (if nested
              (push (cons (vector key) def) maps)
            (dolist (bind (embark--all-bindings def))
-             (push (cons (vconcat (vector key) (car bind))
-                         (cdr bind))
+             (push (cons (vconcat (vector key) (car bind)) (cdr bind))
                    maps))))
         (def (push (cons (vector key) def) bindings))))
      (keymap-canonicalize keymap))
     (nconc (nreverse bindings) (nreverse maps))))
 
-(defvar embark-collect-direct-action-minor-mode-map (make-sparse-keymap)
-  "Keymap for direct bindings to embark actions.")
+(defun embark-collect--direct-action-map (type)
+  "Return a direct action keymap for targets of given TYPE."
+  (let* ((actions (embark--action-keymap type nil))
+         (map (make-sparse-keymap)))
+    (set-keymap-parent map button-map)
+    (pcase-dolist (`(,key . ,cmd) (embark--all-bindings actions))
+      (unless (or (equal key [13])
+                  (memq cmd '(digit-argument negative-argument)))
+        (define-key map key (if (eq cmd 'embark-keymap-help)
+                                #'embark-bindings-at-point
+                              (embark--action-command cmd)))))
+    map))
 
 (define-minor-mode embark-collect-direct-action-minor-mode
   "Bind type-specific actions directly (without need for `embark-act')."
   :init-value nil
   :lighter " Act"
-  :keymap embark-collect-direct-action-minor-mode-map
-  (when embark-collect-direct-action-minor-mode
-    ;; must mutate keymap, not make new one
-    (let ((map embark-collect-direct-action-minor-mode-map))
-      (setcdr map nil)
-      (cl-loop for (key . cmd) in (embark--all-bindings
-                                   (embark--action-keymap embark--type nil))
-               unless (eq cmd 'embark-keymap-help)
-               do (define-key map key (embark--action-command cmd))))))
+  (unless (derived-mode-p 'embark-collect-mode)
+    (user-error "Not in an Embark Collect buffer"))
+  (save-excursion
+    (goto-char (point-min))
+    (let ((inhibit-read-only t) maps)
+      (while (progn
+               (when (tabulated-list-get-id)
+                 (put-text-property
+                  (point) (button-end (point)) 'keymap
+                  (if embark-collect-direct-action-minor-mode
+                      (when-let ((target (embark-collect--target))
+                                 (type (plist-get target :type)))
+                        (or (alist-get type maps)
+                            (setf (alist-get type maps)
+                                  (embark-collect--direct-action-map type)))))))
+               (forward-button 1 nil nil t))))))
 
 (define-button-type 'embark-collect-entry
   'face 'embark-collect-candidate
   'action 'embark-collect-choose)
+
+(declare-function outline-toggle-children "outline")
+(define-button-type 'embark-collect-group
+  'face 'embark-collect-group-title
+  'action (lambda (_) (outline-toggle-children)))
 
 (defun embark--boundaries ()
   "Get current minibuffer completion boundaries."
@@ -2667,16 +2712,22 @@ If NESTED is non-nil subkeymaps are not flattened."
   ("A" embark-act-all)
   ("M-a" embark-collect-direct-action-minor-mode)
   ("z" embark-collect-zebra-minor-mode)
-  ("e" embark-export)
+  ("E" embark-export)
   ("t" embark-collect-toggle-marks)
   ("m" embark-collect-mark)
   ("u" embark-collect-unmark)
   ("U" embark-collect-unmark-all)
   ("s" isearch-forward)
-  ("f" forward-button)
-  ("b" backward-button)
-  ("<right>" forward-button)
-  ("<left>" backward-button))
+  ("n" forward-button)
+  ("p" backward-button)
+  ([remap forward-paragraph] 'outline-next-heading)
+  ("}" 'outline-next-heading)
+  ([remap backward-paragraph] 'outline-previous-heading)
+  ("{" 'outline-previous-heading))
+
+(defconst embark-collect--outline-string (string #x210000)
+  "Special string used for outine headings in Embark Collect buffers.
+Chosen to be extremely unlikely to appear in a candidate.")
 
 (define-derived-mode embark-collect-mode tabulated-list-mode "Embark Collect"
   "List of candidates to be acted on.
@@ -2817,28 +2868,53 @@ candidate."
               (setq pos inv))))))
     (if chunks (apply #'concat (nreverse chunks)) string)))
 
-(defun embark-collect--format-entries (candidates)
-  "Format CANDIDATES for `tabulated-list-mode'."
-  (let ((max-width 0))
+(defun embark-collect--format-entries (candidates grouper)
+  "Format CANDIDATES for `tabulated-list-mode' grouped by GROUPER.
+The GROUPER is either nil or a function like the `group-function'
+completion metadatum, that is, a function of two arguments, the
+first of which is a candidate and the second controls what is
+computed: if nil, the title of the group the candidate belongs
+to, and if non-nil, a rewriting of the candidate (useful to
+simplify the candidate so it doesn't repeat the group title, for
+example)."
+  (let ((max-width 0)
+        (transform
+         (if grouper (lambda (cand) (funcall grouper cand t)) #'identity)))
     (setq tabulated-list-entries
-          (mapcar
-           (pcase-lambda (`(,cand ,prefix ,annotation))
-             (let* ((display (embark--for-display cand))
-                    (length (length annotation))
-                    (faces (text-property-not-all
-                            0 length 'face nil annotation)))
-               (setq max-width (max max-width (+ (string-width prefix)
-                                                 (string-width display))))
-               (when faces
-                 (add-face-text-property 0 length 'default t annotation))
-               `(,cand
-                 [(,(propertize display 'line-prefix prefix)
-                   type embark-collect-entry)
-                  (,annotation
-                   skip t
-                   ,@(unless faces
-                       '(face embark-collect-annotation)))])))
-           candidates))
+          (mapcan
+           (lambda (group)
+             (cons
+              `(nil [(,(concat (propertize embark-collect--outline-string
+                                           'invisible t)
+                               (format embark-collect-group-format (car group)))
+                      type embark-collect-group)
+                     ("" skip t)])
+              (mapcar
+               (pcase-lambda (`(,cand ,prefix ,annotation))
+                 (let* ((display (embark--for-display (funcall transform cand)))
+                        (length (length annotation))
+                        (faces (text-property-not-all
+                                0 length 'face nil annotation)))
+                   (setq max-width (max max-width (+ (string-width prefix)
+                                                     (string-width display))))
+                   (when faces
+                     (add-face-text-property 0 length 'default t annotation))
+                   `(,cand
+                     [(,(propertize display 'line-prefix prefix)
+                       type embark-collect-entry)
+                      (,annotation
+                       skip t
+                       ,@(unless faces
+                           '(face embark-collect-annotation)))])))
+               (cdr group))))
+           (if grouper
+               (seq-group-by (lambda (item) (funcall grouper (car item) nil))
+                             candidates)
+             (list (cons "" candidates)))))
+    (if (null grouper)
+        (pop tabulated-list-entries)
+      (setq-local outline-regexp embark-collect--outline-string)
+      (outline-minor-mode))
     (setq tabulated-list-format
           `[("Candidate" ,max-width t) ("Annotation" 0 t)])))
 
@@ -2847,7 +2923,8 @@ candidate."
   (let* ((transformed (embark--maybe-transform-candidates))
          (type (plist-get transformed :orig-type)) ; we need the originals for
          (candidates (plist-get transformed :orig-candidates)) ; default action
-         (affixator (embark-collect--affixator type)))
+         (affixator (embark-collect--affixator type))
+         (grouper (embark-collect--metadatum type 'group-function)))
     (when (eq type 'file)
       (let ((dir (buffer-local-value 'default-directory buffer)))
         (setq candidates
@@ -2858,7 +2935,7 @@ candidate."
     (setq candidates (funcall affixator candidates))
     (with-current-buffer buffer
       (setq embark--type type)
-      (embark-collect--format-entries candidates))
+      (embark-collect--format-entries candidates grouper))
     candidates))
 
 (defun embark--collect (buffer-name)
@@ -3280,7 +3357,7 @@ With a prefix argument, prompt the user (unless STRINGS has 0 or
     "\n"))
 
 (defun embark-copy-as-kill (strings)
-  "Join STRINGS and save on the kill-ring.
+  "Join STRINGS and save on the `kill-ring'.
 With a prefix argument, prompt for the separator to join the
 STRINGS, which defaults to a newline."
   (kill-new (string-join strings (embark--separator strings))))
