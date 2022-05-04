@@ -1164,7 +1164,11 @@ first line of the documentation string; otherwise use the word
     ((keymapp cmd)
      (propertize (if (symbolp cmd) (format "+%s" cmd) "<keymap>")
                  'face 'embark-keymap))
-    ((symbolp cmd) (symbol-name cmd))
+    ((symbolp cmd)
+     (let ((name (symbol-name cmd)))
+       (if (string-prefix-p "embark-action--" name) ; direct action mode
+           (format "(%s)" (string-remove-prefix "embark-action--" name))
+         name)))
     ((when-let (doc (and (functionp cmd) (ignore-errors (documentation cmd))))
        (save-match-data
          (when (string-match "^\\(.*\\)$" doc)
@@ -1218,6 +1222,7 @@ If NESTED is non-nil subkeymaps are not flattened."
                    unless (or
                            ;; skip which-key pseudo keys and other invalid pairs
                            (and (not (keymapp cmd))
+                                (not (functionp cmd))
                                 (consp cmd)
                                 (not (stringp (car cmd))))
                            (memq cmd '(embark-keymap-help
@@ -2344,7 +2349,19 @@ to bind.
 Before the actual list of binding pairs you can include the
 keyword `:parent' followed by a keymap, to specify a parent for
 the defined keymap.  If the `:parent' keymap is absent,
-`embark-general-map' is used by default."
+`embark-general-map' is used by default.
+
+If you intend to use the keymap defined by this macro with Embark
+as an action keymap, it is recommended that you add a binding for
+RET to an action that makes sense as a default for the type of
+target you will the keymap for.  For example, in
+`embark-file-map' RET is bound to `find-file' by default.
+
+Note, though, that the binding for RET may be overridden at the
+moment `embark-act' is called, either by an entry from
+`embark-default-action-overrides', or if there is no relevant
+entry there but `embark-act' is called from the minibuffer, by
+the command that opened the minibuffer in the first place."
   (declare (indent 1))
   (let* ((map (make-symbol "map"))
          (parent (if (eq :parent (car bindings))
@@ -2621,7 +2638,8 @@ Returns the name of the command."
                  (when-let (target (embark-collect--target))
                    (let ((prefix-arg arg))
                      (embark--act action target)))))
-    (put name 'function-documentation (documentation action))
+    (when (fboundp action)
+      (put name 'function-documentation (documentation action)))
     name))
 
 (defun embark--all-bindings (keymap &optional nested)
