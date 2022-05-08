@@ -78,6 +78,22 @@ Embark, Marginalia and Consult
 @node Overview
 @chapter Overview
 
+Embark makes it easy to choose a command to run based on what is near
+point, both during a minibuffer completion session (in a way familiar
+to Helm or Counsel users) and in normal buffers. Bind the command
+@samp{embark-act} to a key and it acts like prefix-key for a keymap of
+@emph{actions} (commands) relevant to the @emph{target} around point. With point on
+an URL in a buffer you can open the URL in a browser or eww or
+download the file it points to. If while switching buffers you spot an
+old one, you can kill it right there and continue to select another.
+Embark comes preconfigured with over a hundred actions for common
+types of targets such as files, buffers, identifiers, s-expressions,
+sentences; and it is easy to add more actions and more target types.
+Embark can also collect all the candidates in a minibuffer to an
+occur-like buffer or export them to a buffer in a major-mode specific
+to the type of candidates, such as dired for a set of files, ibuffer
+for a set of buffers, or customize for a set of variables.
+
 @menu
 * Acting on targets::
 * The default action on a target::
@@ -88,10 +104,10 @@ Embark, Marginalia and Consult
 @node Acting on targets
 @section Acting on targets
 
-This package provides a sort of right-click contextual menu for Emacs,
-accessed through the @samp{embark-act} command (which you should bind to a
-convenient key), offering you relevant @emph{actions} to use on a @emph{target}
-determined by the context:
+You can think of @samp{embark-act} as a keyboard-based version of a
+right-click contextual menu. The @samp{embark-act} command (which you should
+bind to a convenient key), acts as a prefix for a keymap offering you
+relevant @emph{actions} to use on a @emph{target} determined by the context:
 
 @itemize
 @item

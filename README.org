@@ -12,12 +12,28 @@
 
 * Overview
 
+Embark makes it easy to choose a command to run based on what is near
+point, both during a minibuffer completion session (in a way familiar
+to Helm or Counsel users) and in normal buffers. Bind the command
+=embark-act= to a key and it acts like prefix-key for a keymap of
+/actions/ (commands) relevant to the /target/ around point. With point on
+an URL in a buffer you can open the URL in a browser or eww or
+download the file it points to. If while switching buffers you spot an
+old one, you can kill it right there and continue to select another.
+Embark comes preconfigured with over a hundred actions for common
+types of targets such as files, buffers, identifiers, s-expressions,
+sentences; and it is easy to add more actions and more target types.
+Embark can also collect all the candidates in a minibuffer to an
+occur-like buffer or export them to a buffer in a major-mode specific
+to the type of candidates, such as dired for a set of files, ibuffer
+for a set of buffers, or customize for a set of variables.
+
 ** Acting on targets
 
-This package provides a sort of right-click contextual menu for Emacs,
-accessed through the =embark-act= command (which you should bind to a
-convenient key), offering you relevant /actions/ to use on a /target/
-determined by the context:
+You can think of =embark-act= as a keyboard-based version of a
+right-click contextual menu. The =embark-act= command (which you should
+bind to a convenient key), acts as a prefix for a keymap offering you
+relevant /actions/ to use on a /target/ determined by the context:
 
 - In the minibuffer, the target is the current top completion
   candidate.

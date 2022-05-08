@@ -1,6 +1,6 @@
 ;;; embark-org.el --- Embark targets and actions for Org Mode  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2021  Omar Antolín Camarena
+;; Copyright (C) 2022  Free Software Foundation, Inc.
 
 ;; Author: Omar Antolín Camarena <omar@matem.unam.mx>
 ;; Keywords: convenience
@@ -21,11 +21,11 @@
 ;;; Commentary:
 
 ;; This package configures the Embark package for use in Org Mode
-;; buffers. It teaches Embark a number of Org related targets and
-;; appropriate actions. Currently it has table cells, whole tables,
-;; and links. Targets to add: headings (Embark already has generic
-;; support for outlines, so we just nee to add Org specific actions),
-;; dates, source blocks, etc.
+;; buffers.  It teaches Embark a number of Org related targets and
+;; appropriate actions.  Currently it has table cells, whole tables,
+;; source blocks and links.  Targets to add: headings (Embark already
+;; has generic support for outlines, so we just nee to add Org
+;; specific actions), timestamps, etc.
 
 ;;; Code:
 
@@ -119,6 +119,22 @@
 
 (add-to-list 'embark-target-finders 'embark-org-target-element-context)
 
+;;; Custom Org actions
+
+(defun embark-org-copy-as-markdown (start end)
+  "Export the region from START to END to markdown and save on the kill-ring."
+  (interactive "r")
+  (kill-new
+   (let (org-export-with-toc)
+     (string-trim
+      (org-export-string-as (buffer-substring-no-properties start end) 'md t))))
+  (deactivate-mark))
+
+(add-to-list 'embark-pre-action-hooks
+             '(embark-org-copy-as-markdown embark--mark-target))
+
+(define-key embark-region-map "M" #'embark-org-copy-as-markdown) ; good idea?
+
 ;;; Tables
 
 (defun embark-org-target-table ()
@@ -150,8 +166,9 @@
   "Keymap for actions on entire Org table."
   ;; TODO: default action?
   ("=" org-table-edit-formulas)
-  ("c" org-table-convert)
+  ("s" org-table-sort-lines)
   ("t" org-table-transpose-table-at-point)
+  ("c" org-table-convert)
   ("f" org-table-follow-field-mode)
   ("y" org-table-paste-rectangle)
   ("d" org-table-toggle-formula-debugger)
@@ -255,8 +272,6 @@ what part or in what format the link is copied."
 (embark-org-define-link-copier in-full full " in full")
 (embark-org-define-link-copier description description "'s description")
 (embark-org-define-link-copier target target "'s target")
-(embark-org-define-link-copier
- as-markdown (format "[%s](%s)" description target) "as Markdown")
 
 (fset 'embark-org-copy-link-inner-target 'kill-new)
 (put 'embark-org-copy-link-inner-target 'function-documentation
@@ -272,31 +287,22 @@ For URLs the inner part is the whole target including the 'http:'
 or 'https:' prefix.  For any other type of link the inner part is
 also the whole target.")
 
-(embark-define-keymap embark-org-copy-map
+(embark-define-keymap embark-org-link-copy-map
   "Keymap for different ways to copy Org links to the kill-ring."
   :parent nil
   ("w" embark-org-copy-link-in-full)
   ("d" embark-org-copy-link-description)
   ("t" embark-org-copy-link-target)
   ("i" embark-org-copy-link-inner-target)
-  ("m" embark-org-copy-link-as-markdown))
+  ("m" embark-org-copy-as-markdown))
 
-(fset 'embark-org-copy-map embark-org-copy-map)
+(fset 'embark-org-link-copy-map embark-org-link-copy-map)
 
 (embark-define-keymap embark-org-link-map
   "Keymap for actions on Org links"
   ("RET" org-open-at-point)
   ("'" org-insert-link)
-  ("w" 'embark-org-copy-map))
-
-(defmacro embark-org--define-link-keymap (type)
-  "Define a keymap for Org link of given TYPE.
-The keymap will inherit from `embark-org-link-map' and from
-`embark-TYPE-map' in that order."
-  `(defvar ,(intern (format "embark-org-%s-link-map" type))
-     (make-composed-keymap embark-org-link-map
-                           ,(intern (format "embark-%s-map" type)))
-     ,(format "Keymap for Embark actions on Org %s links" type)))
+  ("w" 'embark-org-link-copy-map))
 
 ;; The reason for this is left as an exercise to the reader.
 ;; Solution: Na ryvfc gnetrg znl cebzcg gur hfre sbe fbzrguvat!
@@ -306,17 +312,16 @@ The keymap will inherit from `embark-org-link-map' and from
 (push 'embark--ignore-target
       (alist-get 'org-insert-link embark-target-injection-hooks))
 
-(embark-org--define-link-keymap url)
-(embark-org--define-link-keymap file)
-(embark-org--define-link-keymap email)
-(embark-org--define-link-keymap expression)
-
-(add-to-list 'embark-keymap-alist '(org-link . embark-org-link-map))
-(add-to-list 'embark-keymap-alist '(org-url-link . embark-org-url-link-map))
-(add-to-list 'embark-keymap-alist '(org-email-link . embark-org-email-link-map))
-(add-to-list 'embark-keymap-alist '(org-file-link . embark-org-file-link-map))
 (add-to-list 'embark-keymap-alist
-             '(org-expression-link . embark-org-expression-link-map))
+             '(org-link embark-org-link-map))
+(add-to-list 'embark-keymap-alist
+             '(org-url-link embark-org-link-map embark-url-map))
+(add-to-list 'embark-keymap-alist
+             '(org-email-link embark-org-link-map embark-email-map))
+(add-to-list 'embark-keymap-alist
+             '(org-file-link embark-org-link-map embark-file-map))
+(add-to-list 'embark-keymap-alist
+             '(org-expression-link embark-org-link-map embark-expression-map))
 
 ;;; Source blocks and babel calls
 
@@ -336,6 +341,19 @@ The keymap will inherit from `embark-org-link-map' and from
   (add-to-list 'embark-repeat-actions motion))
 
 (add-to-list 'embark-keymap-alist '(org-src-block . embark-org-src-block-map))
+
+;;; "Encode" region using Org export in place
+
+(embark-define-keymap embark-org-export-in-place-map
+  "Keymap for actions which replace the region by an exported version."
+  ("m" org-md-convert-region-to-md)
+  ("h" org-html-convert-region-to-html)
+  ("a" org-ascii-convert-region-to-ascii)
+  ("l" org-latex-convert-region-to-latex))
+
+(fset 'embark-org-export-in-place-map embark-org-export-in-place-map)
+
+(define-key embark-encode-map "o" 'embark-org-export-in-place-map)
 
 (provide 'embark-org)
 ;;; embark-org.el ends here
