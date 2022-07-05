@@ -148,7 +148,7 @@
     (heading embark-heading-map)
     (t embark-general-map))
   "Alist of action types and corresponding keymaps.
-The special key `t' is associated with the default keymap to use.
+The special key t is associated with the default keymap to use.
 Each value can be either a single symbol whose value is a keymap,
 or a list of such symbols."
   :type '(alist :key-type (symbol :tag "Target type")
@@ -2660,7 +2660,7 @@ This takes into account `embark-transformer-alist'."
   "Turn an ACTION into a command to perform the action.
 Returns the name of the command."
   (let ((name (intern (format "embark-action--%s"
-                              (embark--command-name action))))) 
+                              (embark--command-name action)))))
     (fset name (lambda (arg)
                  (interactive "P")
                  (when-let (target (embark-collect--target))
@@ -2791,7 +2791,8 @@ just restarts the completion session, that is, the command that
 opened the minibuffer is run again and the minibuffer contents
 restored.  You can then interact normally with the command,
 perhaps editing the minibuffer contents, and, if you wish, you
-can rerun `embark-collect' to get an updated buffer.")
+can rerun `embark-collect' to get an updated buffer."
+    :interactive nil :abbrev-table nil :syntax-table nil)
 
 (defun embark-collect--remove-zebra-stripes ()
   "Remove highlighting of alternate rows."
@@ -3475,8 +3476,10 @@ Sorting and history are disabled. PROMPT is the prompt message."
   "Remove FILE from the list of recent files."
   (interactive (list (embark--read-from-history
                       "Remove recent file: " recentf-list 'file)))
-  (embark-history-remove file)
-  (setq recentf-list (delete (expand-file-name file) recentf-list)))
+  (embark-history-remove (expand-file-name file))
+  (embark-history-remove (abbreviate-file-name file))
+  (when (and (boundp 'recentf-list) (fboundp 'recentf-expand-file-name))
+    (setq recentf-list (delete (recentf-expand-file-name file) recentf-list))))
 
 (defun embark-history-remove (str)
   "Remove STR from `minibuffer-history-variable'.
