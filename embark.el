@@ -647,13 +647,21 @@ This function is meant to be added to `minibuffer-setup-hook'."
       `(region ,(buffer-substring start end) . (,start . ,end)))))
 
 (autoload 'dired-get-filename "dired")
+(declare-function image-dired-original-file-name "image-dired")
 
 (defun embark-target-file-at-point ()
   "Target file at point.
-This function mostly relies on `ffap-file-at-point', with one exception:
-In `dired-mode', it uses `dired-get-filename' instead."
-  (if-let (file (and (derived-mode-p 'dired-mode)
-                     (dired-get-filename t 'no-error-if-not-filep)))
+This function mostly relies on `ffap-file-at-point', with the
+following exceptions:
+
+- In `dired-mode', it uses `dired-get-filename' instead.
+
+- In `imaged-dired-thumbnail-mode', it uses
+  `image-dired-original-file-name' instead."
+  (if-let (file (or (and (derived-mode-p 'dired-mode)
+                         (dired-get-filename t 'no-error-if-not-filep))
+                    (and (derived-mode-p 'image-dired-thumbnail-mode)
+                         (image-dired-original-file-name))))
       (save-excursion
         (end-of-line)
         `(file ,(abbreviate-file-name (expand-file-name file))
@@ -842,7 +850,7 @@ completion UI highly compatible with it, like Icomplete.
 Many completion UIs can still work with Embark but will need
 their own target finder.  See for example
 `embark--vertico-selected' or `embark--selectrum-selected'."
-  (when (minibufferp)
+  (when (and (minibufferp) minibuffer-completion-table)
     (pcase-let* ((`(,category . ,candidates) (embark-minibuffer-candidates))
                  (contents (minibuffer-contents))
                  (top (if (test-completion contents
@@ -1971,7 +1979,7 @@ plist concerns one target, and has keys `:type', `:target',
      'embark-target-finders
      (lambda (fun)
        (when-let (found (funcall fun))
-         (let* ((type (car found))
+         (let* ((type (or (car found) 'general))
                 (target+bounds (cdr found))
                 (target (if (consp target+bounds)
                             (car target+bounds)
@@ -3251,6 +3259,11 @@ PRED is a predicate function used to filter the items."
 
 ;;; Integration with external completion UIs
 
+;; Ensure that the Marginalia cache is reset, such that
+;; `embark-toggle-variable-value' updates the display (See #540).
+(with-eval-after-load 'marginalia
+  (push 'marginalia--cache-reset (alist-get :always embark-post-action-hooks)))
+
 ;; vertico
 
 (declare-function vertico--candidate "ext:vertico")
@@ -3436,11 +3449,11 @@ its own."
                 (maybe-whitespace ()
                   (if multiline (maybe-newline) (maybe-space)))
                 (ins-string ()
-                  (save-excursion
+                  (let ((start (point)))
                     (insert (string-join strings separator))
+                    (save-excursion (goto-char start) (maybe-whitespace))
                     (when (looking-back "\n" 1) (delete-char -1))
-                    (maybe-whitespace))
-                  (maybe-whitespace)))
+                    (save-excursion (maybe-whitespace)))))
       (if buffer-read-only
           (with-selected-window (other-window-for-scrolling)
             (ins-string))
@@ -3557,13 +3570,16 @@ Returns the new name actually used."
   (interactive "SVariable: ")
   (insert (string-trim (pp-to-string (symbol-value var)))))
 
-(defun embark-toggle-variable-value (var)
-  "Toggle value of boolean variable VAR."
-  (interactive "SVariable: ")
+(defun embark-toggle-variable (var &optional local)
+  "Toggle value of boolean variable VAR.
+If prefix LOCAL is non-nil make variable local."
+  (interactive "SVariable: \nP")
   (let ((val (symbol-value var)))
     (unless (memq val '(nil t))
       (user-error "Not a boolean variable"))
-    (funcall (or (get var 'custom-set) #'set-default) var (not val))))
+    (when local
+      (make-local-variable var))
+    (funcall (or (get var 'custom-set) 'set) var (not val))))
 
 (defun embark-insert-relative-path (file)
   "Insert relative path to FILE.
@@ -4157,7 +4173,7 @@ library, which have an obvious notion of associated directory."
   ("u" customize-variable)
   ("v" embark-save-variable-value)
   ("<" embark-insert-variable-value)
-  ("t" embark-toggle-variable-value))
+  ("t" embark-toggle-variable))
 
 (embark-define-keymap embark-function-map
   "Keymap for Embark function actions."
