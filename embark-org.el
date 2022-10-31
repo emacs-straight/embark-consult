@@ -233,6 +233,8 @@
 ;; slightly more complex design allows both whole-link and inner
 ;; target actions to work without cycling.
 
+(autoload 'org-attach-dir "org-attach")
+
 (defun embark-org--refine-link-type (_type target)
   "Refine link type if we have more specific actions available."
   (when (string-match org-link-any-re target)
@@ -247,6 +249,12 @@
         (cons 'org-file-link
               (replace-regexp-in-string
                "::.*" "" (string-remove-prefix "file:" target))))
+       ((string-prefix-p "attachment:" target)
+        (cons 'org-file-link
+              (expand-file-name
+               (replace-regexp-in-string
+                "::.*" "" (string-remove-prefix "attachment:" target))
+               (org-attach-dir))))
        ((string-match-p "^[./]" target)
         (cons 'org-file-link (abbreviate-file-name (expand-file-name target))))
        ((string-prefix-p "elisp:(" target)
