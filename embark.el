@@ -5,7 +5,7 @@
 ;; Author: Omar Antolín Camarena <omar@matem.unam.mx>
 ;; Maintainer: Omar Antolín Camarena <omar@matem.unam.mx>
 ;; Keywords: convenience
-;; Version: 0.17
+;; Version: 0.18
 ;; Homepage: https://github.com/oantolin/embark
 ;; Package-Requires: ((emacs "26.1"))
 
@@ -2141,7 +2141,7 @@ Return a plist with keys `:type', `:orig-type', `:candidates', and
                       candidates))))
     (append
      (list :orig-type type :orig-candidates candidates)
-     (or (unless (null candidates)
+     (or (when candidates
            (when-let ((transformer (alist-get type embark-transformer-alist)))
              (pcase-let* ((`(,new-type . ,first-cand)
                            (funcall transformer type (car candidates))))
@@ -2567,7 +2567,7 @@ all buffers."
            ;; distinguished from the "single marked file" case by
            ;; returning (list t marked-file) in the latter
            (let ((marked (dired-get-marked-files t nil nil t)))
-             (and (not (null (cdr marked)))
+             (and (cdr marked)
                   (if (eq (car marked) t) (cdr marked) marked)))
            (save-excursion
              (goto-char (point-min))
@@ -3818,7 +3818,7 @@ The advice is self-removing so it only affects ACTION once."
 
 (defun embark--allow-edit (&rest _)
   "Allow editing the target."
-  (remove-hook 'post-command-hook 'exit-minibuffer t)
+  (remove-hook 'post-command-hook #'exit-minibuffer t)
   (remove-hook 'post-command-hook 'ivy-immediate-done t))
 
 (defun embark--ignore-target (&rest _)
@@ -4298,5 +4298,8 @@ library, which have an obvious notion of associated directory."
 (with-eval-after-load 'consult
   (unless (require 'embark-consult nil 'noerror)
     (warn "The package embark-consult should be installed if you use both Embark and Consult")))
+
+(with-eval-after-load 'org
+  (require 'embark-org))
 
 ;;; embark.el ends here
