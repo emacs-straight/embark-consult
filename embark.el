@@ -2291,8 +2291,11 @@ See `embark-act' for the meaning of the prefix ARG."
                        0
                      (mod (prefix-numeric-value arg) (length targets)))
                    targets)))
-             (default-action (embark--default-action (plist-get target :type)))
+             (type (plist-get target :type))
+             (default-action (embark--default-action type))
              (action (or (command-remapping default-action) default-action)))
+        (unless action
+          (user-error "No default action for %s targets" type))
         (when (and arg (minibufferp)) (setq embark--toggle-quit t))
         (embark--act action
                      (if (and (eq default-action embark--command)
@@ -4184,6 +4187,7 @@ library, which have an obvious notion of associated directory."
 
 (embark-define-keymap embark-package-map
   "Keymap for Embark package actions."
+  ("RET" describe-package)
   ("h" describe-package)
   ("i" package-install)
   ("I" embark-insert)
