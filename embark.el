@@ -2461,11 +2461,6 @@ default is `embark-collect'"
   "Hook run after `embark-export' in the newly created buffer."
   :type 'hook)
 
-(defvar embark-separator-history nil
-  "Input history for the separators used by some embark commands.
-The commands that prompt for a string separator are
-`embark-insert' and `embark-copy-as-kill'.")
-
 (defface embark-collect-candidate '((t :inherit default))
   "Face for candidates in Embark Collect buffers.")
 
@@ -2504,6 +2499,9 @@ This is only used for annotation that are not already fontified.")
 (defcustom embark-collect-post-revert-hook nil
   "Hook run after an Embark Collect buffer is updated."
   :type 'hook)
+
+(defvar-local embark--rerun-function nil
+  "Function to rerun the collect or export that made the current buffer.")
 
 (defun embark-collect--post-revert (&rest _)
   "Run `embark-collect-post-revert-hook'.
@@ -2986,7 +2984,7 @@ example)."
 The function `generate-new-buffer-name' is used to ensure the
 buffer has a unique name."
   (let ((buffer (generate-new-buffer buffer-name))
-        (revert (embark--revert-function #'embark-collect)))
+        (rerun (embark--rerun-function #'embark-collect)))
     (with-current-buffer buffer
       ;; we'll run the mode hooks once the buffer is displayed, so
       ;; the hooks can make use of the window
@@ -3000,7 +2998,8 @@ buffer has a unique name."
       (setq tabulated-list-use-header-line nil ; default to no header
             header-line-format nil
             tabulated-list--header-string nil)
-      (setq revert-buffer-function revert)
+      (setq embark--rerun-function rerun)
+      (local-set-key [remap revert-buffer] #'embark-rerun-collect-or-export)
       (when (memq embark--type embark-collect-zebra-types)
         (embark-collect-zebra-minor-mode)))
 
@@ -3028,14 +3027,15 @@ TYPE should be either `collect' or `export'."
 To control the display, add an entry to `display-buffer-alist'
 with key \"Embark Collect\".
 
-Reverting an Embark Collect buffer has slightly unusual behavior
-if the buffer was obtained by running `embark-collect' from
-within a minibuffer completion session.  In that case reverting
-just restarts the completion session, that is, the command that
-opened the minibuffer is run again and the minibuffer contents
-restored.  You can then interact normally with the command,
-perhaps editing the minibuffer contents, and, if you wish, you
-can rerun `embark-collect' to get an updated buffer."
+In Embark Collect buffers `revert-buffer' is remapped to
+`embark-rerun-collect-or-export', which has slightly unusual
+behavior if the buffer was obtained by running `embark-collect'
+from within a minibuffer completion session.  In that case
+rerunning just restarts the completion session, that is, the
+command that opened the minibuffer is run again and the
+minibuffer contents restored.  You can then interact normally with
+the command, perhaps editing the minibuffer contents, and, if you
+wish, you can rerun `embark-collect' to get an updated buffer."
   (interactive)
   (let ((buffer (embark--collect (embark--descriptive-buffer-name 'collect))))
     (when (minibufferp)
@@ -3079,12 +3079,12 @@ with key \"Embark Live\"."
     (when (minibufferp)
       (add-hook 'change-major-mode-hook stop-collect nil t))))
 
-(defun embark--revert-function (kind)
-  "Return a revert function for an export or collect buffer in this context.
+(defun embark--rerun-function (kind)
+  "Return a rerun function for an export or collect buffer in this context.
 The parameter KIND should be either `embark-export' or `embark-collect'."
   (let ((buffer (or embark--target-buffer (embark--target-buffer)))
         (command embark--command))
-    (cl-flet ((reverter (action)
+    (cl-flet ((rerunner (action)
                 (lambda (&rest _)
                   (quit-window 'kill-buffer)
                   (with-current-buffer
@@ -3092,7 +3092,7 @@ The parameter KIND should be either `embark-export' or `embark-collect'."
                     (let ((embark--command command))
                       (funcall action))))))
         (if (minibufferp)
-          (reverter
+          (rerunner
            (let ((input (minibuffer-contents-no-properties)))
              (lambda ()
                (minibuffer-with-setup-hook
@@ -3101,7 +3101,14 @@ The parameter KIND should be either `embark-export' or `embark-collect'."
                      (insert input))
                  (setq this-command embark--command)
                  (command-execute embark--command)))))
-          (reverter kind)))))
+          (rerunner kind)))))
+
+(defun embark-rerun-collect-or-export ()
+  "Rerun the `embark-collect' or `embark-export' that created this buffer."
+  (interactive)
+  (if embark--rerun-function
+      (funcall embark--rerun-function)
+    (user-error "No function to rerun collect or export found.")))
 
 ;;;###autoload
 (defun embark-export ()
@@ -3109,14 +3116,16 @@ The parameter KIND should be either `embark-export' or `embark-collect'."
 The variable `embark-exporters-alist' controls how to make the
 buffer for each type of completion.
 
-Reverting an Embark Export buffer has slightly unusual behavior if
-the buffer was obtained by running `embark-export' from within a
-minibuffer completion session.  In that case reverting just
-restarts the completion session, that is, the command that opened
-the minibuffer is run again and the minibuffer contents restored.
-You can then interact normally with the command, perhaps editing
-the minibuffer contents, and, if you wish, you can rerun
-`embark-export' to get an updated buffer."
+In Embark Export buffers `revert-buffer' is remapped to
+`embark-rerun-collect-or-export', which has slightly unusual
+behavior if the buffer was obtained by running `embark-export'
+from within a minibuffer completion session.  In that case
+reverting just restarts the completion session, that is, the
+command that opened the minibuffer is run again and the
+minibuffer contents restored.  You can then interact normally
+with the command, perhaps editing the minibuffer contents, and,
+if you wish, you can rerun `embark-export' to get an updated
+buffer."
   (interactive)
   (let* ((transformed (embark--maybe-transform-candidates))
          (candidates (or (plist-get transformed :candidates)
@@ -3129,7 +3138,7 @@ the minibuffer contents, and, if you wish, you can rerun
         (let ((after embark-after-export-hook)
               (cmd embark--command)
               (name (embark--descriptive-buffer-name 'export))
-              (revert (embark--revert-function #'embark-export))
+              (rerun (embark--rerun-function #'embark-export))
               (buffer (save-excursion
                         (funcall exporter candidates)
                         (current-buffer))))
@@ -3137,7 +3146,9 @@ the minibuffer contents, and, if you wish, you can rerun
            (lambda ()
              (pop-to-buffer buffer)
              (rename-buffer name t)
-             (setq-local revert-buffer-function revert)
+             (setq embark--rerun-function rerun)
+             (local-set-key [remap revert-buffer]
+                            #'embark-rerun-collect-or-export)
              (let ((embark-after-export-hook after)
                    (embark--command cmd))
                (run-hooks 'embark-after-export-hook)))))))))
@@ -3379,6 +3390,11 @@ Return the category metadatum as the type of the target."
   (add-hook 'embark-candidate-collectors #'embark--ivy-candidates))
 
 ;;; Custom actions
+
+(defvar embark-separator-history nil
+  "Input history for the separators used by some embark commands.
+The commands that prompt for a string separator are
+`embark-insert' and `embark-copy-as-kill'.")
 
 (defun embark-keymap-help ()
   "Prompt for an action to perform or command to become and run it."
