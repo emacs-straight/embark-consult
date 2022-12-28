@@ -175,16 +175,20 @@ or a list of such symbols."
     embark-target-defun-at-point
     embark-target-prog-heading-at-point)
   "List of functions to determine the target in current context.
-Each function should take no arguments and return either nil to
-indicate that no target has been found, a cons (type . target)
-where type is a symbol and target is a string, or a triple of the
-form (type target . bounds), where bounds is the (beg . end)
-bounds pair of the target at point for highlighting."
+Each function should take no arguments and return either:
+
+1. a cons (type . target) where type is a symbol and target is a
+   string,
+
+2. a triple of the form (type target . bounds), where bounds is
+   the (beg . end) bounds pair of the target at point for
+   highlighting, or
+
+3. a possibly empty list of targets, each of type 1 or 2."
   :type 'hook)
 
 (defcustom embark-transformer-alist
   '((minor-mode . embark--lookup-lighter-minor-mode)
-    (symbol . embark--refine-symbol-type)
     (embark-keybinding . embark--keybinding-command)
     (project-file . embark--project-file-full-path)
     (package . embark--remove-package-version)
@@ -320,6 +324,7 @@ indicate that for files at the prompt of the `delete-file' command,
   '((async-shell-command embark--allow-edit embark--shell-prep)
     (shell-command embark--allow-edit embark--shell-prep)
     (pp-eval-expression embark--eval-prep)
+    (eval-expression embark--eval-prep)
     (package-delete embark--force-complete)
     ;; commands evaluating code found in the buffer, which may in turn prompt
     (embark-pp-eval-defun embark--ignore-target)
@@ -797,6 +802,31 @@ in one of those major modes."
 (embark-define-thingatpt-target paragraph
   text-mode help-mode Info-mode man-common)
 
+(defun embark--identifier-types (identifier)
+  "Return list of target types appropriate for IDENTIFIER."
+  (let ((symbol (intern-soft identifier)))
+    (if (not
+         (or (derived-mode-p 'emacs-lisp-mode 'inferior-emacs-lisp-mode)
+             (and (not (derived-mode-p 'prog-mode))
+                  symbol
+                  (or (boundp symbol) (fboundp symbol) (symbol-plist symbol)))))
+        '(identifier)
+      (let* ((library (ffap-el-mode identifier))
+             (types
+              (append
+               (and (commandp symbol) '(command))
+               (and symbol (boundp symbol) (not (keywordp symbol)) '(variable))
+               (and (fboundp symbol) (not (commandp symbol)) '(function))
+               (and (facep symbol) '(face))
+               (and library '(library))
+               (and (featurep 'package) (embark--package-desc symbol)
+                    '(package)))))
+        (when (and library
+                   (looking-back "\\(?:require\\|use-package\\).*"
+                                 (line-beginning-position)))
+          (setq types (embark--rotate types (cl-position 'library types))))
+        (or types '(symbol))))))
+
 (defun embark-target-identifier-at-point ()
   "Target identifier at point.
 
@@ -819,15 +849,8 @@ As a convenience, in Org Mode an initial ' or surrounding == or
                (setq name (substring name 1 -1))
                (cl-incf (car bounds))
                (cl-decf (cdr bounds)))))
-      `(,(if (or (derived-mode-p 'emacs-lisp-mode 'inferior-emacs-lisp-mode)
-                 (and
-                  (not (derived-mode-p 'prog-mode))
-                  (when-let ((sym (intern-soft name)))
-                    (or (boundp sym) (fboundp sym) (symbol-plist sym)))))
-             'symbol
-           'identifier)
-        ,name
-        . ,bounds))))
+      (mapcar (lambda (type) `(,type ,name . ,bounds))
+              (embark--identifier-types name)))))
 
 (defun embark-target-heading-at-point ()
   "Target the outline heading at point."
@@ -1090,7 +1113,8 @@ UPDATE is the indicator update function."
         update))
       ((or 'minibuffer-keyboard-quit 'abort-recursive-edit 'abort-minibuffers)
        nil)
-      ((guard (let ((def (lookup-key keymap keys))) ; if directly bound, then obey
+      ((guard (let ((def (lookup-key keymap keys))) ; if directly
+                                                    ; bound, then obey
                 (and def (not (numberp def))))) ; number means "invalid prefix"
        cmd)
       ('self-insert-command
@@ -1919,29 +1943,6 @@ minibuffer before executing the action."
   (or (get-text-property 0 'multi-category target)
       (cons 'general target)))
 
-(defun embark--refine-symbol-type (_type target)
-  "Refine symbol TARGET to more specific type if possible."
-  (cons (let ((symbol (intern-soft target))
-              (library (ffap-el-mode target)))
-          (cond
-           ((and library
-                 (looking-back "\\(?:require\\|use-package\\).*"
-                               (line-beginning-position)))
-            'library)
-           ((keywordp symbol) 'symbol) ; keywords are bound to themselves!
-           ((commandp symbol) 'command)
-           ((and symbol (boundp symbol)) 'variable)
-           ;; Prefer variables over functions for backward compatibility.
-           ;; Command > variable > function > face > library > package > symbol
-           ;; seems like a reasonable order with decreasing usefulness
-           ;; of the actions.
-           ((fboundp symbol) 'function)
-           ((facep symbol) 'face)
-           (library 'library)
-           ((and (featurep 'package) (embark--package-desc symbol)) 'package)
-           (t 'symbol)))
-        target))
-
 (defun embark--simplify-path (_type target)
   "Simplify and '//' or '~/' in the TARGET file path."
   (cons 'file (substitute-in-file-name target)))
@@ -2007,11 +2008,12 @@ return a `cons' of the transformed type and transformed target.
 The return value of `embark--targets' is a list of plists.  Each
 plist concerns one target, and has keys `:type', `:target',
 `:orig-type', `:orig-target' and `:bounds'."
-  (let ((targets))
+  (let (targets)
     (run-hook-wrapped
      'embark-target-finders
      (lambda (fun)
-       (when-let (found (funcall fun))
+       (dolist (found (when-let (result (funcall fun))
+                        (if (consp (car result)) result (list result))))
          (let* ((type (or (car found) 'general))
                 (target+bounds (cdr found))
                 (target (if (consp target+bounds)
@@ -2025,8 +2027,8 @@ plist concerns one target, and has keys `:type', `:target',
                       (let ((trans (funcall transform type target)))
                         (list :type (car trans) :target (cdr trans)))
                     (list :type type :target target)))))
-           (push full-target targets)
-           (minibufferp)))))
+           (push full-target targets)))
+       (and targets (minibufferp))))
     (cl-delete-duplicates
      (nreverse targets)
      :test (lambda (t1 t2)
@@ -3234,8 +3236,9 @@ PRED is a predicate function used to filter the items."
 
 (defun embark-export-customize-variable (variables)
   "Create a customization buffer listing VARIABLES."
-  ;; The widget library serializes/deserializes the values.
-  ;; We advise the serialization in order to avoid errors for nonserializable variables.
+  ;; The widget library serializes/deserializes the values. We advise
+  ;; the serialization in order to avoid errors for nonserializable
+  ;; variables.
   (cl-letf* ((ht (make-hash-table :test #'equal))
              (orig-read (symbol-function #'read))
              (orig-write (symbol-function 'widget-sexp-value-to-internal))
@@ -3848,9 +3851,9 @@ and leaves the point to the left of it."
   "Select first minibuffer completion candidate matching target."
   (minibuffer-force-complete))
 
-(defun embark--eval-prep (&rest _)
-  "If target is: a variable, skip edit; a function, wrap in parens."
-  (when (fboundp (intern-soft (minibuffer-contents)))
+(cl-defun embark--eval-prep (&key type &allow-other-keys)
+  "If target's TYPE is: variable, skip edit; function, wrap in parens."
+  (when (memq type '(command function))
     (embark--allow-edit)
     (goto-char (minibuffer-prompt-end))
     (insert "(")
@@ -3886,7 +3889,8 @@ After marking the target, this calls RUN with the REST of its arguments."
   "Deactivate the region target."
   (deactivate-mark t))
 
-(cl-defun embark--narrow-to-target (&rest rest &key run bounds &allow-other-keys)
+(cl-defun embark--narrow-to-target
+    (&rest rest &key run bounds &allow-other-keys)
   "Narrow buffer to target if its BOUNDS are known.
 Intended for use as an Embark around-action hook.  This function
 runs RUN with the buffer narrowed to given BOUNDS passing along
