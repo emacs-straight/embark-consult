@@ -7,7 +7,7 @@
 ;; Keywords: convenience
 ;; Version: 0.21.1
 ;; Homepage: https://github.com/oantolin/embark
-;; Package-Requires: ((emacs "27.1") (compat "29.1.3.0"))
+;; Package-Requires: ((emacs "27.1") (compat "29.1.3.4"))
 
 ;; This file is part of GNU Emacs.
 
@@ -968,7 +968,7 @@ cycling bindings, just what's registered in
    (mapcar #'symbol-value
            (let ((actions (or (alist-get type embark-keymap-alist)
                               (alist-get t embark-keymap-alist))))
-             (if (consp actions) actions (list actions))))))
+             (ensure-list actions)))))
 
 (defun embark--action-keymap (type cycle)
   "Return action keymap for targets of given TYPE.
@@ -991,6 +991,30 @@ If CYCLE is non-nil bind `embark-cycle'."
   (if-let (pos (string-match-p "\n" target))
       (concat (car (split-string target "\n" 'omit-nulls "\\s-*")) "…")
     target))
+
+;;;###autoload
+(defun embark-eldoc-first-target (report &rest _)
+  "Eldoc function reporting the first Embark target at point.
+This function uses the eldoc REPORT callback and is meant to be
+added to `eldoc-documentation-functions'."
+  (when-let ((target (car (embark--targets))))
+    (funcall report
+             (format "Embark on %s ‘%s’"
+                     (plist-get target :type)
+                     (embark--truncate-target (plist-get target :target))))))
+
+;;;###autoload
+(defun embark-eldoc-target-types (report &rest _)
+  "Eldoc function reporting the types of all Embark targets at point.
+This function uses the eldoc REPORT callback and is meant to be
+added to `eldoc-documentation-functions'."
+  (when-let ((targets (embark--targets)))
+    (funcall report
+             (format "Embark target types: %s"
+                     (mapconcat
+                      (lambda (target) (symbol-name (plist-get target :type)))
+                      targets
+                      ", ")))))
 
 (defun embark--format-targets (target shadowed-targets rep)
   "Return a formatted string indicating the TARGET of an action.
@@ -1022,15 +1046,14 @@ a repeating sequence of actions."
               (plist-get target :multi)
               (plist-get target :type)))
      (t (format
-         "%s on %s%s '%s'"
+         "%s on %s%s ‘%s’"
          act
          (plist-get target :type)
          (if shadowed-targets
              (format (propertize "(%s)" 'face 'shadow)
-                     (string-join
-                      (mapcar (lambda (x)
-                                (symbol-name (plist-get x :type)))
-                              shadowed-targets)
+                     (mapconcat
+                      (lambda (target) (symbol-name (plist-get target :type)))
+                      shadowed-targets
                       ", "))
            "")
          (embark--truncate-target (plist-get target :target)))))))
@@ -2427,6 +2450,7 @@ point."
          (command-execute command))))))
 
 (defmacro embark-define-keymap (&rest _)
+  "Obsolete macro, use `defvar-keymap' instead."
   (error "`embark-define-keymap' has been deprecated in Embark 0.21.
 Use standard methods for defining keymaps, such as `defvar-keymap'.
 Remember to make `embark-general-map' the parent if appropriate"))
