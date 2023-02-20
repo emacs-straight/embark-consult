@@ -223,7 +223,7 @@ Finally, there is also an =embark-live= variant of the =embark-collect=
 command which automatically updates the collection after each change
 in the source buffer. Users of a completion UI that automatically
 updates and displays the candidate list (such as Vertico, Icomplete,
-Selectrum, Fido-mode, or MCT) will probably not want to use
+Fido-mode, or MCT) will probably not want to use
 =embark-live= from the minibuffer as they will then have two live
 updating displays of the completion candidates!
 
@@ -358,7 +358,7 @@ Embark needs to know what your minibuffer completion system considers
 to be the list of candidates and which one is the current candidate.
 Embark works out of the box if you use Emacs's default tab completion,
 the built-in =icomplete-mode= or =fido-mode=, or the third-party packages
-[[https://github.com/minad/vertico][Vertico]], [[https://github.com/raxod502/selectrum/][Selectrum]] or [[https://github.com/abo-abo/swiper][Ivy]].
+[[https://github.com/minad/vertico][Vertico]] or [[https://github.com/abo-abo/swiper][Ivy]].
 
 If you are a [[https://emacs-helm.github.io/helm/][Helm]] or [[https://github.com/abo-abo/swiper][Ivy]] user you are unlikely to want Embark since
 those packages include comprehensive functionality for acting on
@@ -790,17 +790,20 @@ to do is teach Embark that =wikipedia:Garry_Kasparov= stands for the URL
 You can be as fancy as you want with the recognized syntax. Here, to
 keep the example simple, I'll assume the link matches the regexp
 =wikipedia:[[:alnum:]_]+=. We will write a function that looks for a
-match surrounding point, and returns an improper list of the form
-='(url actual-url-of-the-page beg . end)= where =beg= and =end= are the
-buffer positions where the target starts and ends, and are used by
-Embark to highlight the target (if you have =embark-highlight-indicator=
-included in the list =embark-indicators=).
+match surrounding point, and returns a dotted list of the form ='(url
+URL-OF-THE-PAGE START . END)= where =START= and =END= are the buffer
+positions bounding the target, and are used by Embark to highlight it
+if you have =embark-highlight-indicator= included in the list
+=embark-indicators=. (There are a couple of other options for the return
+value of a target finder: the bounding positions are optional and a
+single target finder is allowed to return multiple targets; see the
+documentation for =embark-target-finders= for details.)
 
 #+begin_src emacs-lisp
   (defun my-short-wikipedia-link ()
     "Target a link at point of the form wikipedia:Page_Name."
     (save-excursion
-      (let* ((beg (progn (skip-chars-backward "[:alnum:]_:") (point)))
+      (let* ((start (progn (skip-chars-backward "[:alnum:]_:") (point)))
              (end (progn (skip-chars-forward "[:alnum:]_:") (point)))
              (str (buffer-substring-no-properties beg end)))
         (save-match-data
@@ -808,7 +811,7 @@ included in the list =embark-indicators=).
             `(url
               ,(format "https://en.wikipedia.org/wiki/%s"
                        (match-string 1 str))
-              ,beg . ,end))))))
+              ,start . ,end))))))
 
   (add-to-list 'embark-target-finders 'my-short-wikipedia-link)
 #+end_src
