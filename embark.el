@@ -1186,6 +1186,7 @@ first line of the documentation string; otherwise use the word
   (concat ; fresh copy, so we can freely add text properties
    (cond
     ((stringp (car-safe cmd)) (car cmd))
+    ((eq (car-safe cmd) 'menu-item) (cadr cmd))
     ((keymapp cmd)
      (propertize (if (symbolp cmd) (format "+%s" cmd) "<keymap>")
                  'face 'embark-keymap))
@@ -1216,7 +1217,7 @@ first line of the documentation string; otherwise use the word
 ;; We cannot use the completion annotators in this case.
 (defun embark--function-doc (sym)
   "Documentation string of function SYM."
-  (let ((vstr (and (keymapp sym) (boundp sym)
+  (let ((vstr (and (symbolp sym) (keymapp sym) (boundp sym)
                    (eq (symbol-function sym) (symbol-value sym))
                    (documentation-property sym 'variable-documentation))))
     (when-let (str (or (ignore-errors (documentation sym)) vstr))
@@ -1242,28 +1243,19 @@ the tye of the current target."
 The keybindings are returned in their order of appearance.
 If NESTED is non-nil subkeymaps are not flattened."
   (let* ((commands
-          (cl-loop for (key . cmd) in (embark--all-bindings keymap nested)
-                   for name = (embark--command-name cmd)
-                   unless (or
-                           ;; skip which-key pseudo keys and other invalid pairs
-                           (and (not (keymapp cmd))
-                                (not (functionp cmd))
-                                (consp cmd)
-                                (not (stringp (car cmd))))
-                           (memq cmd '(embark-keymap-help
-                                       negative-argument digit-argument)))
-                   collect (list name
-                                 (cond
-                                  ((and (not (symbolp cmd)) (keymapp cmd))
-                                   'keymap)
-                                  ((and (consp cmd) (stringp (car cmd)))
-                                   (cdr cmd))
-                                  (t cmd))
-                                 key
-                                 (concat (key-description key)))))
+          (cl-loop for (key . def) in (embark--all-bindings keymap nested)
+                   for name = (embark--command-name def)
+                   for cmd = (keymap--menu-item-binding def)
+                   unless (memq cmd '(nil embark-keymap-help
+                                      negative-argument digit-argument))
+                   collect (list name cmd key
+                                 (concat
+                                  (if (eq (car-safe def) 'menu-item)
+                                      "menu-item"
+                                    (key-description key))))))
          (width (cl-loop for (_name _cmd _key desc) in commands
                          maximize (length desc)))
-         (def)
+         (default)
          (candidates
           (cl-loop for item in commands
                    for (name cmd key desc) = item
@@ -1279,9 +1271,9 @@ If NESTED is non-nil subkeymaps are not flattened."
                             name)
                     'embark-command cmd)
                    when (equal key [13])
-                   do (setq def formatted)
+                   do (setq default formatted)
                    collect (cons formatted item))))
-    (cons candidates def)))
+    (cons candidates default)))
 
 (defun embark--with-category (category candidates)
   "Return completion table for CANDIDATES of CATEGORY with sorting disabled."
