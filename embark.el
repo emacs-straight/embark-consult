@@ -152,6 +152,8 @@
     (paragraph embark-paragraph-map)
     (kill-ring embark-kill-ring-map)
     (heading embark-heading-map)
+    (flymake embark-flymake-map)
+    (smerge smerge-basic-map embark-general-map)
     (t embark-general-map))
   "Alist of action types and corresponding keymaps.
 The special key t is associated with the default keymap to use.
@@ -168,6 +170,8 @@ or a list of such symbols."
     embark-target-collect-candidate
     embark-target-completion-at-point
     embark-target-bug-reference-at-point
+    embark-target-flymake-at-point
+    embark-target-smerge-at-point
     embark-target-package-at-point
     embark-target-email-at-point
     embark-target-url-at-point
@@ -372,7 +376,6 @@ the key :always are executed always."
 (defcustom embark-pre-action-hooks
   `(;; commands that need to position point at the beginning or end
     (eval-last-sexp embark--end-of-target)
-    (embark-pp-eval-defun embark--end-of-target)
     (indent-pp-sexp embark--beginning-of-target)
     (backward-up-list embark--beginning-of-target)
     (backward-list embark--beginning-of-target)
@@ -517,11 +520,16 @@ argument: a one element list containing the target."
     org-move-subtree-up org-move-subtree-down
     ;; transpose commands
     transpose-sexps transpose-sentences transpose-paragraphs
-    ;; movement
+    ;; navigation commands
+    flymake-goto-next-error flymake-goto-prev-error
     embark-next-symbol embark-previous-symbol
     backward-up-list backward-list forward-list forward-sexp
     backward-sexp forward-sentence backward-sentence
-    forward-paragraph backward-paragraph)
+    forward-paragraph backward-paragraph
+    ;; smerge commands
+    smerge-refine smerge-combine-with-next smerge-keep-current
+    smerge-keep-upper smerge-keep-lower smerge-keep-base
+    smerge-keep-all smerge-resolve smerge-prev smerge-next)
   "List of repeatable actions.
 When you use a command on this list as an Embark action from
 outside the minibuffer, `embark-act' does not exit but instead
@@ -542,6 +550,15 @@ action."
   :type '(repeat (choice function
                          (cons function
                                (symbol :tag "Next target type")))))
+
+;;; Overlay properties
+
+;; high priority to override both bug reference and the lazy
+;; isearch highlights in embark-isearch-highlight-indicator
+(put 'embark-target 'face 'embark-target)
+(put 'embark-target 'priority 1001)
+(put 'embark-selected 'face 'embark-selected)
+(put 'embark-selected 'priority 1001)
 
 ;;; Stashing information for actions in buffer local variables
 
@@ -723,13 +740,6 @@ different priorities in `embark-target-finders'."
               (lib (ffap-el-mode name)))
     `(file ,lib . ,(bounds-of-thing-at-point 'filename))))
 
-(defun embark-target-bug-reference-at-point ()
-  "Target a bug reference at point."
-  (when-let ((ov (seq-find (lambda (ov) (overlay-get ov 'bug-reference-url))
-                           (overlays-at (point)))))
-    `(url ,(overlay-get ov 'bug-reference-url)
-          ,(overlay-start ov) . ,(overlay-end ov))))
-
 (defun embark-target-package-at-point ()
   "Target the package on the current line in a packages buffer."
   (when (derived-mode-p 'package-menu-mode)
@@ -802,6 +812,36 @@ different priorities in `embark-target-finders'."
          (end (ignore-errors (scan-sexps start 1))))
       (unless (eq start (car (bounds-of-thing-at-point 'defun)))
       `(expression ,(buffer-substring start end) ,start . ,end)))))
+
+(defmacro embark-define-overlay-target (name prop &optional pred type target)
+  "Define a target finder for NAME based on overlays with property PROP.
+PRED is an optional expression that must hold when a target is
+found and defaults to only requiring the overlay property be
+non-nil.  TYPE is an optional target type and defaults to the
+symbol NAME.  TARGET is an optional expression evaluating to the
+target string and defaults to the substring of the buffer covered
+by the overlay.  In the PRED and TARGET expressions, the symbols
+%o and %p will be bound to the overlay and the overlay's property
+respectively."
+  `(defun ,(intern (format "embark-target-%s-at-point" name)) ()
+     ,(format "Target %s at point." name)
+     (when-let ((%o (seq-find
+                           (lambda (%o)
+                             (when-let ((%p (overlay-get %o ',prop)))
+                               (ignore %p)
+                               ,(or pred t)))
+                           (overlays-in (max (point-min) (1- (point)))
+                                        (min (point-max) (1+ (point))))))
+                (%p (overlay-get %o ',prop)))
+       (ignore %p)
+       (cons ',(or type name)
+             (cons ,(or target `(buffer-substring-no-properties
+                                 (overlay-start %o) (overlay-end %o)))
+                   (cons (overlay-start %o) (overlay-end %o)))))))
+
+(embark-define-overlay-target flymake flymake-diagnostic)
+(embark-define-overlay-target bug-reference bug-reference-url nil url %p)
+(embark-define-overlay-target smerge smerge (eq %p 'conflict))
 
 (defmacro embark-define-thingatpt-target (thing &rest modes)
   "Define a target finder for THING using the thingatpt library.
@@ -1752,7 +1792,7 @@ text properties `keymap' or `local-map', from either buffer text
 or an overlay.  These are not widely used in Emacs, and when they
 are used can be somewhat hard to discover.  Examples of locations
 that have such a keymap are links and images in `eww' buffers,
-attachment links in `gnus' article buffers, and the 'Stash' line
+attachment links in `gnus' article buffers, and the stash line
 in a `vc-dir' buffer."
   (interactive)
   (let ((keymaps (delq nil (list (get-char-property (point) 'keymap)
@@ -2297,7 +2337,9 @@ ARG is the prefix argument."
                       (cl-letf (((symbol-function 'embark--restart) #'ignore)
                                 ((symbol-function 'embark--confirm) #'ignore))
                         (let ((prefix-arg prefix))
-                          (embark--act action candidate)))))
+                          (when-let ((bounds (plist-get candidate :bounds)))
+                            (goto-char (car bounds))
+                            (embark--act action candidate))))))
                (quit (embark--quit-p action)))
           (when (and (eq action (embark--default-action type))
                      (eq action embark--command))
@@ -2310,12 +2352,13 @@ ARG is the prefix argument."
             (if (memq action embark-multitarget-actions)
                 (let ((prefix-arg prefix))
                   (embark--act action transformed quit))
-              (if quit
-                  (embark--quit-and-run #'mapc act candidates)
-                (mapc act candidates)
-                (when (memq 'embark--restart
-                            (alist-get action embark-post-action-hooks))
-                  (embark--restart))))))
+              (save-excursion
+                (if quit
+                    (embark--quit-and-run #'mapc act candidates)
+                  (mapc act candidates)
+                  (when (memq 'embark--restart
+                              (alist-get action embark-post-action-hooks))
+                    (embark--restart)))))))
       (dolist (cand candidates)
         (when-let ((bounds (plist-get cand :bounds)))
           (set-marker (car bounds) nil) ; yay, manual memory management!
@@ -2334,12 +2377,9 @@ ARG is the prefix argument."
         (when bounds
           (if overlay
               (move-overlay overlay (car bounds) (cdr bounds))
-            (setq overlay (make-overlay (car bounds) (cdr bounds))))
-          (overlay-put overlay 'face 'embark-target)
-          (overlay-put overlay 'window (selected-window))
-          ;; high priority to override both bug reference and the lazy
-          ;; isearch highlights in embark-isearch-highlight-indicator
-          (overlay-put overlay 'priority 1001))))))
+            (setq overlay (make-overlay (car bounds) (cdr bounds)))
+            (overlay-put overlay 'category 'embark-target))
+          (overlay-put overlay 'window (selected-window)))))))
 
 (defun embark-isearch-highlight-indicator ()
   "Action indicator highlighting all occurrences of the identifier at point.
@@ -2468,12 +2508,6 @@ point."
              (last-nonmenu-event 13))
          (setq this-command command)
          (command-execute command))))))
-
-(defmacro embark-define-keymap (&rest _)
-  "Obsolete macro, use `defvar-keymap' instead."
-  (error "`embark-define-keymap' has been deprecated in Embark 0.21.
-Use standard methods for defining keymaps, such as `defvar-keymap'.
-Remember to make `embark-general-map' the parent if appropriate"))
 
 ;;; Embark collect
 
@@ -3258,8 +3292,7 @@ If BOUNDS are given, also highlight the target when selecting it."
       (let ((target (copy-sequence orig-target)) overlay)
         (when bounds
           (setq overlay (make-overlay (car bounds) (cdr bounds)))
-          (overlay-put overlay 'face 'embark-selected)
-          (overlay-put overlay 'priority 1001))
+          (overlay-put overlay 'category 'embark-selected))
         (add-text-properties 0 (length orig-target)
                              `(multi-category ,(cons orig-type orig-target))
                              target)
@@ -3303,7 +3336,6 @@ You can act on all selected targets at once with `embark-act-all'.")
 
 (declare-function vertico--candidate "ext:vertico")
 (declare-function vertico--update "ext:vertico")
-(declare-function vertico--remove-face "ext:vertico")
 (defvar vertico--input)
 (defvar vertico--candidates)
 (defvar vertico--base)
@@ -4157,7 +4189,6 @@ This simply calls RUN with the REST of its arguments inside
   "RET" #'embark-pp-eval-defun
   "e" #'embark-pp-eval-defun
   "c" #'compile-defun
-  "l" #'elint-defun
   "D" #'edebug-defun
   "o" #'checkdoc-defun
   "N" #'narrow-to-defun)
@@ -4301,6 +4332,13 @@ This simply calls RUN with the REST of its arguments inside
   "n" #'forward-paragraph
   "p" #'backward-paragraph
   "R" #'repunctuate-sentences)
+
+(defvar-keymap embark-flymake-map
+  :doc "Keymap for Embark actions on Flymake diagnostics."
+  :parent embark-general-map
+  "RET" 'flymake-show-buffer-diagnostics
+  "n" 'flymake-goto-next-error
+  "p" 'flymake-goto-prev-error)
 
 (defvar-keymap embark-become-help-map
   :doc "Keymap for Embark help actions."
