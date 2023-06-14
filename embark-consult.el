@@ -381,9 +381,21 @@ for any action that is a Consult async command."
       (goto-char (point-max))
       (insert separator))))
 
+(cl-defun embark-consult--projectless
+    (&rest rest &key run target type &allow-other-keys)
+  "Run action with nil `consult-project-function', if TARGET has an directory.
+The values of TYPE which are considered to have an associated
+directory are: file, buffer, bookmark and library.  The REST of
+the arguments are also passed to RUN."
+  (when (embark--associated-directory target type)
+    (let (consult-project-function)
+      (apply run :target target :type type rest))))
+
 (map-keymap
  (lambda (_key cmd)
    (cl-pushnew #'embark--cd (alist-get cmd embark-around-action-hooks))
+   (cl-pushnew #'embark-consult--projectless
+               (alist-get cmd embark-around-action-hooks))
    (cl-pushnew #'embark-consult--prep-async
                (alist-get cmd embark-target-injection-hooks)))
  embark-consult-async-search-map)
