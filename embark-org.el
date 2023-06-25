@@ -399,7 +399,7 @@ bound to i."
 
 (add-to-list 'embark-keymap-alist '(org-heading embark-org-heading-map))
 
-;;; Source blocks and babel calls
+;;; Source blocks
 
 (defun embark-org-copy-block-contents ()
   "Save contents of source block at point to the `kill-ring'."
@@ -446,6 +446,15 @@ of the arguments."
 (dolist (motion '(org-babel-next-src-block org-babel-previous-src-block))
   (add-to-list 'embark-repeat-actions motion))
 
+(dolist (cmd '(org-babel-execute-maybe
+               org-babel-lob-execute-maybe
+               org-babel-execute-src-block
+               org-babel-execute-src-block-maybe
+               org-babel-execute-buffer
+               org-babel-execute-subtree))
+  (cl-pushnew #'embark--ignore-target
+              (alist-get cmd embark-target-injection-hooks)))
+
 (add-to-list 'embark-keymap-alist '(org-src-block embark-org-src-block-map))
 
 ;;; Inline source blocks
@@ -459,6 +468,17 @@ of the arguments."
 
 (add-to-list 'embark-keymap-alist
              '(org-inline-src-block embark-org-inline-src-block-map))
+
+;;; Babel calls
+
+(defvar-keymap embark-org-babel-call-map
+  :doc "Keymap for actions on Org babel calls."
+  :parent embark-general-map
+  "RET" #'org-babel-lob-execute-maybe
+  "k" #'org-babel-remove-result)
+
+(add-to-list 'embark-keymap-alist
+             '(org-babel-call embark-org-babel-call-map))
 
 ;;; List items
 
@@ -549,26 +569,26 @@ REST are the remaining arguments."
 (defvar-keymap embark-org-agenda-item-map
   :doc "Keymap for actions on Org agenda items"
   :parent embark-general-map
-  "RET" #'org-agenda-todo
-  "j" #'org-agenda-goto
-  "n" #'org-agenda-next-item
-  "p" #'org-agenda-previous-item
-  "t" #'org-agenda-todo
-  "k" #'org-agenda-kill
-  "u" #'org-agenda-undo
-  "D" #'org-agenda-toggle-deadlines
-  "a" #'org-agenda-archive
-  "i" #'org-agenda-clock-in
-  "o" #'org-agenda-clock-out
-  ":" #'org-agenda-set-tags
-  "," #'org-agenda-priority
-  "s" #'org-agenda-schedule
-  "d" #'org-agenda-deadline
-  "P" #'org-agenda-set-property
-  "e" #'org-agenda-set-effort
-  "r" #'org-agenda-refile
-  "N" #'org-agenda-add-note
-  "b" #'org-agenda-tree-to-indirect-buffer)
+  "RET" 'org-agenda-todo
+  "j" 'org-agenda-goto
+  "n" 'org-agenda-next-item
+  "p" 'org-agenda-previous-item
+  "t" 'org-agenda-todo
+  "k" 'org-agenda-kill
+  "u" 'org-agenda-undo
+  "D" 'org-agenda-toggle-deadlines
+  "a" 'org-agenda-archive
+  "i" 'org-agenda-clock-in
+  "o" 'org-agenda-clock-out
+  ":" 'org-agenda-set-tags
+  "," 'org-agenda-priority
+  "s" 'org-agenda-schedule
+  "d" 'org-agenda-deadline
+  "P" 'org-agenda-set-property
+  "e" 'org-agenda-set-effort
+  "r" 'org-agenda-refile
+  "N" 'org-agenda-add-note
+  "b" 'org-agenda-tree-to-indirect-buffer)
 
 (add-to-list 'embark-keymap-alist '(org-agenda-item embark-org-agenda-item-map))
 
