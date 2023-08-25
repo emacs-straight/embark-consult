@@ -611,7 +611,7 @@ the variable `embark--target-buffer'.")
 (defun embark--target-buffer ()
   "Return buffer that should be targeted by Embark actions."
   (cond
-   ((and (minibufferp) (minibuffer-selected-window))
+   ((and (minibufferp) minibuffer-completion-table (minibuffer-selected-window))
     (window-buffer (minibuffer-selected-window)))
    ((and embark--target-buffer (buffer-live-p embark--target-buffer))
     embark--target-buffer)
@@ -622,7 +622,7 @@ the variable `embark--target-buffer'.")
 If DISPLAY is non-nil, call `display-buffer' to produce the
 window if necessary."
   (cond
-   ((and (minibufferp) (minibuffer-selected-window))
+   ((and (minibufferp) minibuffer-completion-table (minibuffer-selected-window))
     (minibuffer-selected-window))
    ((and embark--target-window
          (window-live-p embark--target-window)
@@ -3841,14 +3841,16 @@ With a prefix argument EDEBUG, instrument the code for debugging."
                (pp-display-expression result "*Pp Eval Output*"))))
     (eval-defun edebug)))
 
-(defun embark-eval-replace ()
-  "Evaluate region and replace with evaluated result."
-  (interactive)
+(defun embark-eval-replace (noquote)
+  "Evaluate region and replace with evaluated result.
+If NOQUOTE is non-nil (interactively, if called with a prefix
+argument), no quoting is used for strings."
+  (interactive "P")
   (let ((beg (region-beginning))
         (end (region-end)))
     (save-excursion
       (goto-char end)
-      (insert (prin1-to-string
+      (insert (format (if noquote "%s" "%S")
                (eval (read (buffer-substring beg end)) lexical-binding)))
       (delete-region beg end))))
 
