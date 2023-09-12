@@ -164,6 +164,7 @@
   "<left>"  #'org-table-move-cell-left
   "<right>" #'org-table-move-cell-right
   "d" #'org-table-kill-row
+  "c" #'org-table-copy-down
   "D" #'org-table-delete-column ; capital = column
   "^" #'org-table-move-row-up
   "v" #'org-table-move-row-down
@@ -379,15 +380,14 @@ bound to i."
   "T" #'org-tree-to-indirect-buffer
   "<left>" #'org-do-promote
   "<right>" #'org-do-demote
-  "S" #'org-sort
+  "^" #'org-sort
   "r" #'org-refile
-  "i" #'org-clock-in
-  "o" #'org-clock-out
-  "I" #'embark-insert                   ; keep it available
+  "I" #'org-clock-in
+  "O" #'org-clock-out
   "a" #'org-archive-subtree-default-with-confirmation
   "h" #'org-insert-heading-respect-content
   "H" #'org-insert-todo-heading-respect-content
-  "L" #'org-store-link)
+  "l" #'org-store-link)
 
 (dolist (cmd '(org-todo org-metaright org-metaleft org-metaup org-metadown
                org-shiftmetaleft org-shiftmetaright org-cycle org-shifttab))
@@ -584,7 +584,9 @@ target.  Applies RUN to the REST of the arguments."
   (when-let ((target (if (cdr args) (plist-get args :target) (car args)))
              (marker (get-text-property 0 'org-marker target)))
     (pop-to-buffer (marker-buffer marker))
+    (widen)
     (goto-char marker)
+    (org-fold-reveal)
     (pulse-momentary-highlight-one-line)))
 
 (defconst embark-org--invisible-jump-to-remote-heading
