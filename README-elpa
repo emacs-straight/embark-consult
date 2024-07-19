@@ -428,8 +428,8 @@
     installations of) GNOME to input emojis, and Emacs doesn't even get
     a chance to respond to the binding. You can select a different key
     binding for `embark-act' or use `ibus-setup' to change the shortcut
-    for emoji insertion (Emacs 29 will likely use `C-x 8 e e', in case
-    you want to set the same one system-wide).
+    for emoji insertion (Emacs 29 uses `C-x 8 e e', in case you want to
+    set the same one system-wide).
   • The suggested alternative of `M-.' for `embark-dwim' is bound by
     default to `xref-find-definitions'. That is a very useful command
     but overwriting it with `embark-dwim' is sensible since in Embark's
