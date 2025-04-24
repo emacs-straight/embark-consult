@@ -1,2 +1,2 @@
-;; Generated package description from embark-consult.el  -*- no-byte-compile: t -*-
-(define-package "embark-consult" "1.1.0.20250131.230144" "Consult integration for Embark" '((emacs "28.1") (compat "30") (embark "1.1") (consult "1.8")) :commit "d5df0eff182b014ab49328a4dbb1d69eb7faafbd" :authors '(("Omar Antolín Camarena" . "omar@matem.unam.mx")) :maintainer '("Omar Antolín Camarena" . "omar@matem.unam.mx") :keywords '("convenience") :url "https://github.com/oantolin/embark")
+;; Generated package description from embark-consult.el  -*- mode: lisp-data; no-byte-compile: t -*-
+(define-package "embark-consult" "1.1.0.20250423.105002" "Consult integration for Embark" '((emacs "28.1") (compat "30") (embark "1.1") (consult "1.8")) :commit "923d0ec52e2e3e0ae44e497c31c7888e87d08a8f" :authors '(("Omar Antolín Camarena" . "omar@matem.unam.mx")) :maintainer '("Omar Antolín Camarena" . "omar@matem.unam.mx") :keywords '("convenience") :url "https://github.com/oantolin/embark")
