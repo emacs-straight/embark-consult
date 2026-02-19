@@ -4,9 +4,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-
-
-
 1 Overview
 ══════════
 
@@ -413,15 +410,13 @@
   │ 
   │   ;; Hide the mode line of the Embark live/completions buffers
   │   (add-to-list 'display-buffer-alist
-  │ 	       '("\\`\\*Embark Collect \\(Live\\|Completions\\)\\*"
-  │ 		 nil
-  │ 		 (window-parameters (mode-line-format . none)))))
+  │                '("\\`\\*Embark Collect \\(Live\\|Completions\\)\\*"
+  │                  nil
+  │                  (window-parameters (mode-line-format . none)))))
   │ 
   │ ;; Consult users will also want the embark-consult package.
   │ (use-package embark-consult
-  │   :ensure t ; only need to install it, embark loads it after consult if found
-  │   :hook
-  │   (embark-collect-mode . consult-preview-at-point-mode))
+  │   :ensure t) ; only need to install it, embark loads it after consult if found
   └────
 
   About the suggested key bindings for `embark-act' and `embark-dwim':
@@ -578,8 +573,8 @@
   ┌────
   │ (setq embark-indicators
   │       '(embark-minimal-indicator  ; default is embark-mixed-indicator
-  │ 	embark-highlight-indicator
-  │ 	embark-isearch-highlight-indicator))
+  │         embark-highlight-indicator
+  │         embark-isearch-highlight-indicator))
   └────
 
   [Vertico] users may wish to configure a grid display for the actions
@@ -928,15 +923,15 @@
   │   (interactive
   │    (list
   │     (let ((tab-list (or (mapcar (lambda (tab) (cdr (assq 'name tab)))
-  │ 				(tab-bar-tabs))
-  │ 			(user-error "No tabs found"))))
+  │                                 (tab-bar-tabs))
+  │                         (user-error "No tabs found"))))
   │       (completing-read
   │        "Tabs: "
   │        (lambda (string predicate action)
-  │ 	 (if (eq action 'metadata)
-  │ 	     '(metadata (category . tab))
-  │ 	   (complete-with-action
-  │ 	    action tab-list string predicate)))))))
+  │          (if (eq action 'metadata)
+  │              '(metadata (category . tab))
+  │            (complete-with-action
+  │             action tab-list string predicate)))))))
   │   (tab-bar-select-tab-by-name tab))
   └────
 
@@ -951,11 +946,11 @@
   │   (interactive
   │    (list
   │     (let ((tab-list (or (mapcar (lambda (tab) (cdr (assq 'name tab)))
-  │ 				(tab-bar-tabs))
-  │ 			(user-error "No tabs found"))))
+  │                                 (tab-bar-tabs))
+  │                         (user-error "No tabs found"))))
   │       (consult--read tab-list
-  │ 		     :prompt "Tabs: "
-  │ 		     :category 'tab))))
+  │                      :prompt "Tabs: "
+  │                      :category 'tab))))
   │   (tab-bar-select-tab-by-name tab))
   └────
 
@@ -996,7 +991,7 @@
      ┌────
      │ (push #'embark--confirm
      │       (alist-get 'tab-bar-close-tab-by-name
-     │ 		 embark-pre-action-hooks))
+     │                  embark-pre-action-hooks))
      └────
 
   2. You can write your own command that prompts for confirmation and
@@ -1044,14 +1039,14 @@
   │   "Target a link at point of the form wikipedia:Page_Name."
   │   (save-excursion
   │     (let* ((start (progn (skip-chars-backward "[:alnum:]_:") (point)))
-  │ 	   (end (progn (skip-chars-forward "[:alnum:]_:") (point)))
-  │ 	   (str (buffer-substring-no-properties start end)))
+  │            (end (progn (skip-chars-forward "[:alnum:]_:") (point)))
+  │            (str (buffer-substring-no-properties start end)))
   │       (save-match-data
-  │ 	(when (string-match "wikipedia:\\([[:alnum:]_]+\\)" str)
-  │ 	  `(url
-  │ 	    ,(format "https://en.wikipedia.org/wiki/%s"
-  │ 		     (match-string 1 str))
-  │ 	    ,start . ,end))))))
+  │         (when (string-match "wikipedia:\\([[:alnum:]_]+\\)" str)
+  │           `(url
+  │             ,(format "https://en.wikipedia.org/wiki/%s"
+  │                      (match-string 1 str))
+  │             ,start . ,end))))))
   │ 
   │ (add-to-list 'embark-target-finders 'my-short-wikipedia-link)
   └────
@@ -1112,14 +1107,14 @@
   │ (defun example-action-command2 (arg input1 input2)
   │   (interactive "P\nsInput 1: \nsInput 2: ")
   │   (message "The first input %swas `%s', and the second was `%s'."
-  │ 	   (if arg "truly " "")
-  │ 	   input1
-  │ 	   input2))
+  │            (if arg "truly " "")
+  │            input1
+  │            input2))
   │ 
   │ (defun example-action-command3 ()
   │   (interactive)
   │   (message "Your selection was `%s'."
-  │ 	   (completing-read "Select: " '("E" "M" "B" "A" "R" "K"))))
+  │            (completing-read "Select: " '("E" "M" "B" "A" "R" "K"))))
   │ 
   │ (defun example-action-command4 ()
   │   (interactive)
