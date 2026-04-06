@@ -679,7 +679,19 @@
   └────
 
 
-3.4 Running some setup after injecting the target
+3.4 Recording acted-on minibuffer candidates in minibuffer history
+──────────────────────────────────────────────────────────────────
+
+  Confirming minibuffer input with `RET' records the selected candidate
+  in the appropriate history list.  The user option
+  `embark-record-minibuffer-history' controls how Embark records
+  acted-on candidates.  This option accepts three kinds of values: `t'
+  (always record), `nil' (never record), or `(skip ACTIONS...)' to
+  record for everything except the listed actions.  The default is a
+  `skip' form that excludes meta commands such as `embark-export'.
+
+
+3.5 Running some setup after injecting the target
 ─────────────────────────────────────────────────
 
   You can customize what happens after the target is inserted at the
@@ -749,7 +761,7 @@
   entered at that prompt!
 
 
-3.5 Running hooks before, after or around an action
+3.6 Running hooks before, after or around an action
 ───────────────────────────────────────────────────
 
   Embark has three variables, `embark-pre-action-hooks',
@@ -847,7 +859,7 @@
         configuration doesn't use this but it is available for users.
 
 
-3.6 Creating your own keymaps
+3.7 Creating your own keymaps
 ─────────────────────────────
 
   All internal keymaps are defined with the standard helper macro
@@ -869,7 +881,7 @@
   are also made available via `embark-general-map'.
 
 
-3.7 Defining actions for new categories of targets
+3.8 Defining actions for new categories of targets
 ──────────────────────────────────────────────────
 
   It is easy to configure Embark to provide actions for new types of
@@ -880,7 +892,7 @@
   similar situations where the easiest option is not available.
 
 
-3.7.1 New minibuffer target example - tab-bar tabs
+3.8.1 New minibuffer target example - tab-bar tabs
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   As an example let us take a look at the [tab bars]. I'll explain how
@@ -896,7 +908,7 @@
 [tab bars]
 <https://www.gnu.org/software/emacs/manual/html_node/emacs/Tab-Bars.html>
 
-◊ 3.7.1.1 Telling Embark about commands that prompt for tabs by name
+◊ 3.8.1.1 Telling Embark about commands that prompt for tabs by name
 
   For step (1), it would be great if the `tab-bar-mode' commands
   reported the completion category `tab' when asking you for a tab with
@@ -966,7 +978,7 @@
   [Consult] <https://github.com/minad/consult/>
 
 
-◊ 3.7.1.2 Defining and configuring a keymap for tab actions
+◊ 3.8.1.2 Defining and configuring a keymap for tab actions
 
   Let's say we want to offer select, rename and close actions for tabs
   (in addition to Embark general actions, such as saving the tab name to
@@ -1010,7 +1022,7 @@
      You can fix this if you wish as described in the previous section.
 
 
-3.7.2 New target example in regular buffers - short Wikipedia links
+3.8.2 New target example in regular buffers - short Wikipedia links
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Say you want to teach Embark to treat text of the form
