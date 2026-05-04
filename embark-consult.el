@@ -7,7 +7,7 @@
 ;; Keywords: convenience
 ;; Version: 1.2
 ;; URL: https://github.com/oantolin/embark
-;; Package-Requires: ((emacs "29.1") (compat "30") (embark "1.1") (consult "3.2"))
+;; Package-Requires: ((emacs "29.1") (compat "31") (embark "1.1") (consult "3.2"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -158,7 +158,7 @@ candidates do not carry that information."
              (if (null file)
                  (cl-pushnew buffer non-file-buffers)
                (insert (file-relative-name file) ":" lineno ":" contents "\n")
-               (cl-incf count))))
+               (incf count))))
          count))
      :footer
      (lambda ()
@@ -259,7 +259,7 @@ category `consult-grep'."
      (let ((count 0) prop)
        (while (setq prop (text-property-search-forward
                           'face 'consult-highlight-match t))
-         (cl-incf count)
+         (incf count)
          (put-text-property (prop-match-beginning prop)
                             (prop-match-end prop)
                             'font-lock-face
