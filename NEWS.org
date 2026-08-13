@@ -1,4 +1,6 @@
-#+title: Embark changelog
+#+title: Embark News
+#+author: Omar Antolín Camarena
+#+language: en
 
 * Development version
 - The target finders for outline headings now also work with heading
